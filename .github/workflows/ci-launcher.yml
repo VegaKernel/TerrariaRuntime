@@ -1,19 +1,17 @@
 name: "CI-Launcher"
 
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push/pull events but only for the upcoming-nuget-release branch
   push:
     branches: [ upcoming-client-release ]
     tags:
       - "v*"
   pull_request:
     branches: [ upcoming-client-release ]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+env:
+  DOTNET_SDK_VERSION: 11.0.100-preview.7.26381.103
+
 jobs:
   build:
     strategy:
@@ -22,28 +20,22 @@ jobs:
           {
             name: Windows,
             runs_on: windows-latest,
-
             runtime_identifier: win-x64,
             archive_name: otapi_launcher_win.zip,
-
             release_tag: launcher-windows,
           },
           {
             name: MacOS,
             runs_on: macos-latest,
-
             runtime_identifier: osx-x64,
             archive_name: otapi_launcher_macos.zip,
-
             release_tag: launcher-macos,
           },
           {
             name: Linux,
             runs_on: ubuntu-latest,
-
-            runtime_identifier: ubuntu.16.04-x64,
+            runtime_identifier: linux-x64,
             archive_name: otapi_launcher_linux.zip,
-
             release_tag: launcher-linux,
           },
         ]
@@ -53,39 +45,29 @@ jobs:
         shell: bash
     runs-on: ${{ matrix.profile.runs_on }}
 
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
-          submodules: 'recursive'
+          submodules: recursive
 
-      - uses: actions/setup-dotnet@v2
+      - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: '9.0.x' # SDK Version to use; x will use the latest version of the 3.1 channel
-
-      # - name: MonoMod dev build
-      #   run: dotnet nuget add source https://pkgs.dev.azure.com/MonoMod/MonoMod/_packaging/DevBuilds%40Local/nuget/v3/index.json -n DevBuilds@Local
+          dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
 
       - name: Build
         run: |
-            cd OTAPI.Client.Launcher
-            dotnet publish -r ${{ matrix.profile.runtime_identifier }} --framework net9.0 -p:PublishReadyToRun=true --self-contained false -c Release
-            if ${{ matrix.profile.runs_on != 'macos-latest' }} ; then
-              7z a ../${{ matrix.profile.archive_name }} './bin/Release/net9.0/${{ matrix.profile.runtime_identifier }}/publish/*'
-            else
-              mkdir -p OTAPI.app/Contents/Resources
-              mv bin/Release/net9.0/osx-x64/publish OTAPI.app/Contents/MacOS
-              cp ../docs/MacOS.Info.plist OTAPI.app/Contents/Info.plist
-              cp OTAPI.osx.sh OTAPI.app/Contents/MacOS/OTAPI
-              chmod +x OTAPI.app/Contents/MacOS/OTAPI
-              7z a ../${{ matrix.profile.archive_name }} OTAPI.app
-            fi
-
-      # - uses: actions/upload-artifact@v2
-      #   with:
-      #     name: ${{ matrix.profile.name }} Launcher
-      #     path: OTAPI.Client.Launcher/bin/Release/net9.0/${{ matrix.profile.runtime_identifier }}/publish
+          cd OTAPI.Client.Launcher
+          dotnet publish -r ${{ matrix.profile.runtime_identifier }} --framework net9.0 -p:PublishReadyToRun=true --self-contained false -c Release
+          if ${{ matrix.profile.runs_on != 'macos-latest' }} ; then
+            7z a ../${{ matrix.profile.archive_name }} './bin/Release/net9.0/${{ matrix.profile.runtime_identifier }}/publish/*'
+          else
+            mkdir -p OTAPI.app/Contents/Resources
+            mv bin/Release/net9.0/osx-x64/publish OTAPI.app/Contents/MacOS
+            cp ../docs/MacOS.Info.plist OTAPI.app/Contents/Info.plist
+            cp OTAPI.osx.sh OTAPI.app/Contents/MacOS/OTAPI
+            chmod +x OTAPI.app/Contents/MacOS/OTAPI
+            7z a ../${{ matrix.profile.archive_name }} OTAPI.app
+          fi
 
       - uses: "marvinpinto/action-automatic-releases@latest"
         with:
