@@ -19,25 +19,20 @@ along with this program. If not, see <http://www.gnu.org/licenses/>.
 #pragma warning disable CS0626 // Method, operator, or accessor is marked external and has no attributes on it
 #pragma warning disable CS0436 // Type conflicts with imported type
 
+#if Terraria || tModLoader
 using ModFramework;
+#endif
 using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
-/// <summary>
-/// @doc Fixes platform issues in Terraria.Program.DisplayException
-/// </summary>
-/// <summary>
-/// @doc Initiates the module system
-/// </summary>
 namespace Terraria
 {
     partial class patch_Program
     {
-#if !Terraria // the client has a customer MessageBox.Show implementation on avalonia
-        // no WinForms access so just write to console
+#if !Terraria
         public static extern void orig_DisplayException(Exception e);
         public static void DisplayException(Exception e)
         {
@@ -46,17 +41,20 @@ namespace Terraria
 #endif
 
         /// <summary>
-        /// Triggers when mods should start attaching events. At this point assembly resolution should be ready on all platforms.
+        /// Triggers when consumers should start attaching events. At this point assembly resolution is ready.
         /// </summary>
         public static event EventHandler? OnLaunched;
 
+#if Terraria || tModLoader
+        // Client variants retain the upstream runtime ModFramework plugin system.
+        // Dedicated Vega servers use Vega's own module system and must not carry this runtime dependency.
         public static ModContext ModContext { get; } = new ModContext("OTAPI");
+#endif
 
-        static string CSV(params string[] args) => String.Join(",", args.Where(x => !String.IsNullOrWhiteSpace(x)));
+        static string CSV(params string?[] args) => string.Join(",", args.Where(x => !string.IsNullOrWhiteSpace(x)));
 
         private static void Configure()
         {
-            // https://github.com/FNA-XNA/FNA/wiki/4:-FNA-and-Windows-API#64-bit-support
             if (Environment.OSVersion.Platform == PlatformID.Win32NT)
             {
                 var path = Path.Combine(
@@ -72,44 +70,45 @@ namespace Terraria
                 }
                 catch
                 {
-                    // Pre-Windows 7, KB2533623 
                     SetDllDirectory(path);
                 }
             }
 
-            // https://github.com/FNA-XNA/FNA/wiki/7:-FNA-Environment-Variables#fna_graphics_enable_highdpi
-            // NOTE: from documentation: 
-            //       Lastly, when packaging for macOS, be sure this is in your app bundle's Info.plist:
-            //           <key>NSHighResolutionCapable</key>
-            //           <string>True</string>
+#if Terraria || tModLoader
             Environment.SetEnvironmentVariable("FNA_GRAPHICS_ENABLE_HIGHDPI", "1");
+#endif
         }
 
         /// <summary>
-        /// Initialises OTAPI, ModFramework and other plugins.
+        /// Initializes OTAPI runtime hooks. Client variants additionally initialize the legacy ModFramework runtime plugin system.
         /// </summary>
         public static void LaunchOTAPI()
         {
             Configure();
 
+#if Terraria || tModLoader
+            var modFrameworkVersion = $"ModFw:{OTAPI.Common.ModFramework.VersionShort}";
+#else
+            string? modFrameworkVersion = null;
+#endif
             Console.WriteLine($"[OTAPI] Starting up ({CSV(
                 OTAPI.Common.Target.Replace("OTAPI", "").Trim(),
-                OTAPI.Common.VersionShort, 
-                $"ModFw:{OTAPI.Common.ModFramework.VersionShort}"
+                OTAPI.Common.VersionShort,
+                modFrameworkVersion
             )}).");
 
-            // set Assembly type to Terraria/OTAPI for runtime plugins to resolve easier when they dont have a direct ref
+#if Terraria || tModLoader
             ModContext.Parameters.Add(Assembly.GetExecutingAssembly());
 
-            // load modfw plugins
-            const String modificationsPath = "modifications"; // dont use current directory, this then should work for packaged consumers
-            if (Directory.Exists(modificationsPath)) {
-                ModContext.PluginLoader.AddFromFolder(modificationsPath, searchOption: SearchOption.AllDirectories/*load sub folders, e.g. OTAPI.Mods*/);
+            const string modificationsPath = "modifications";
+            if (Directory.Exists(modificationsPath))
+            {
+                ModContext.PluginLoader.AddFromFolder(modificationsPath, searchOption: SearchOption.AllDirectories);
             }
             ModContext.Apply(ModType.Runtime);
+#endif
 
-
-#if Terraria // client
+#if Terraria
             Main.versionNumber += " OTAPI";
             Main.versionNumber2 += " OTAPI";
 #endif
@@ -119,9 +118,9 @@ namespace Terraria
 
         public static void ShutdownOTAPI()
         {
-            // give modfw mods the chance to safely shutdown. e.g. currently the csharp module can run scripts, and some of those scripts (currently) use native Cef.
-            //Modifier.Apply(ModType.Shutdown, optionalParams: new[] { Assembly.GetExecutingAssembly() });
+#if Terraria || tModLoader
             ModContext.Apply(ModType.Shutdown);
+#endif
         }
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -145,7 +144,7 @@ namespace Terraria
             orig_LaunchGame_(isServer);
             ShutdownOTAPI();
         }
-#else // server + client
+#else
 #if Terraria_1442_OrAbove || TerrariaServer_1442_OrAbove
         public static extern void orig_RunGame();
         public static void RunGame()
@@ -167,47 +166,24 @@ namespace Terraria
     }
 }
 
-// just a stub for rosyln - this is defined in another patch
 namespace OTAPI
 {
     [MonoMod.MonoModIgnore]
     public static partial class Common
     {
-#pragma warning disable CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider declaring as nullable.
-        /// <summary>
-        /// The type of patch used to create this assembly.
-        /// e.g. OTAPI PC Server
-        /// </summary>
+#pragma warning disable CS8618 // Non-nullable field must contain a non-null value when exiting constructor.
         public static readonly string Target;
-
-        /// <summary>
-        /// Returns the current version string of OTAPI
-        /// </summary>
         public static readonly string Version;
-
-        /// <summary>
-        /// Returns the current version string of OTAPI with a short hash name
-        /// </summary>
         public static readonly string VersionShort;
-
-        /// <summary>
-        /// The short git hash of the commit used to produce this assembly.
-        /// </summary>
         public static readonly string GitHubCommit;
 
-
+#if Terraria || tModLoader
         public static partial class ModFramework
         {
-            /// <summary>
-            /// Returns the current version string of ModFramework
-            /// </summary>
             public static readonly string Version;
-
-            /// <summary>
-            /// Returns the current version string of ModFramework with a short hash name
-            /// </summary>
             public static readonly string VersionShort;
         }
-#pragma warning restore CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider declaring as nullable.
+#endif
+#pragma warning restore CS8618
     }
 }
