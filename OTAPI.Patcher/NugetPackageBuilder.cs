@@ -22,6 +22,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.Versioning;
 using System.Text;
 
 namespace OTAPI.Patcher;
@@ -34,6 +35,20 @@ public class NugetPackageBuilder
 
     string GetNugetVersionFromAssembly<TType>()
         => GetNugetVersionFromAssembly(typeof(TType).Assembly);
+
+    static string GetTargetFramework()
+    {
+        var frameworkName = typeof(NugetPackageBuilder).Assembly
+            .GetCustomAttribute<TargetFrameworkAttribute>()?.FrameworkName;
+        if (string.IsNullOrWhiteSpace(frameworkName))
+            throw new InvalidOperationException("Unable to determine the OTAPI target framework.");
+
+        var framework = new FrameworkName(frameworkName);
+        if (!string.Equals(framework.Identifier, ".NETCoreApp", StringComparison.Ordinal))
+            throw new InvalidOperationException($"Unsupported OTAPI target framework '{frameworkName}'.");
+
+        return $"net{framework.Version.Major}.{framework.Version.Minor}";
+    }
 
     public string PackageName { get; set; }
     public string NuspecPath { get; set; }
@@ -52,7 +67,7 @@ public class NugetPackageBuilder
         var commitSha = Common.GetGitCommitSha();
         nuspec_xml = nuspec_xml.Replace("[INJECT_GIT_HASH]", String.IsNullOrWhiteSpace(commitSha) ? "" : $" git#{commitSha}");
 
-        var platforms = new[] { "net9.0" }; // relinker only does net9 currently. until there is a reason to implement it...
+        var platforms = new[] { GetTargetFramework() };
         var steamworks = modder.Module.AssemblyReferences.First(x => x.Name == "Steamworks.NET");
         var newtonsoft = modder.Module.AssemblyReferences.First(x => x.Name == "Newtonsoft.Json");
         var dependencies = new[]
