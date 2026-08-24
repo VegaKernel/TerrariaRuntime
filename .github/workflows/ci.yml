@@ -4,7 +4,6 @@ on:
   push:
     branches: [ upcoming, agent/net11-migration ]
   pull_request:
-    branches: [ upcoming ]
   workflow_dispatch:
 
 env:
