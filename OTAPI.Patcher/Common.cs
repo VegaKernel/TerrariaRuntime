@@ -46,8 +46,8 @@ public static partial class Common
     public static string? GetCliValue(string key)
     {
         string find = $"-{key}=";
-        var match = Array.Find(Environment.GetCommandLineArgs(), x => x.StartsWith(find, StringComparison.CurrentCultureIgnoreCase));
-        return match?.Substring(find.Length)?.ToLower();
+        var match = Array.Find(Environment.GetCommandLineArgs(), x => x.StartsWith(find, StringComparison.OrdinalIgnoreCase));
+        return match?.Substring(find.Length)?.ToLowerInvariant();
     }
 
     public static string? GetGitCommitSha()
@@ -102,7 +102,7 @@ public static partial class Common
 
     public static void AddMarkdownFormatter()
     {
-        const string RepoBase = "https://github.com/DeathCradle/Open-Terraria-API/tree/upcoming";
+        const string RepoBase = "https://github.com/VegaKernel/Open-Terraria-API/tree/upcoming";
         const string Scripts = "/OTAPI.Scripts";
         const string HeaderFormat = "| Type | Mod | Platforms | Comment |\n| ---- | ---- | ---- | ---- |";
         MarkdownDocumentor.RegisterTypeFormatter<BasicComment>((header, data) =>
@@ -111,11 +111,11 @@ public static partial class Common
 
             if (data?.FilePath is null) throw new Exception("Unable to determine ");
             var filename = Path.GetFileName(data.FilePath);
-            var client = data.FilePath.Contains("patchtime", StringComparison.CurrentCultureIgnoreCase);
+            var client = data.FilePath.Contains("patchtime", StringComparison.OrdinalIgnoreCase);
 
             var basePath = "";
             if (data.Type == "toplevel")
-                basePath = RepoBase + Scripts + "/TopLevelScripts";
+                basePath = RepoBase + Scripts + "/Mods";
             else if (data.Type == "patch")
                 basePath = RepoBase + Scripts + "/Patches";
             else if (data.Type == "module")
@@ -124,35 +124,35 @@ public static partial class Common
                 filename = Path.GetFileName(Path.GetDirectoryName(data.FilePath));
             }
             else if (data.Type == "script"
-                && Path.GetExtension(data.FilePath).Equals(".lua", StringComparison.CurrentCultureIgnoreCase))
+                && Path.GetExtension(data.FilePath).Equals(".lua", StringComparison.OrdinalIgnoreCase))
             {
                 basePath = RepoBase + Scripts + "/Lua";
                 filename = String.Join("/",
                     data.FilePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                    .Where(dir => !dir.Equals("lua", StringComparison.CurrentCultureIgnoreCase))
+                    .Where(dir => !dir.Equals("lua", StringComparison.OrdinalIgnoreCase))
                     .ToArray()
                 );
             }
             else if (data.Type == "script"
-                && Path.GetExtension(data.FilePath).Equals(".js", StringComparison.CurrentCultureIgnoreCase))
+                && Path.GetExtension(data.FilePath).Equals(".js", StringComparison.OrdinalIgnoreCase))
             {
                 basePath = RepoBase + Scripts + "/JavaScript";
                 filename = String.Join("/",
                     data.FilePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                    .Where(dir => !dir.Equals("clearscript", StringComparison.CurrentCultureIgnoreCase))
+                    .Where(dir => !dir.Equals("clearscript", StringComparison.OrdinalIgnoreCase))
                     .ToArray()
                 );
             }
 
             var platforms = "";
-            if (data.FilePath.Contains(".Both", StringComparison.CurrentCultureIgnoreCase)
-                || data.FilePath.Contains("-Both", StringComparison.CurrentCultureIgnoreCase))
+            if (data.FilePath.Contains(".Both", StringComparison.OrdinalIgnoreCase)
+                || data.FilePath.Contains("-Both", StringComparison.OrdinalIgnoreCase))
                 platforms = "Client & Server";
-            else if (data.FilePath.Contains(".Server", StringComparison.CurrentCultureIgnoreCase)
-                || data.FilePath.Contains("-Server", StringComparison.CurrentCultureIgnoreCase))
+            else if (data.FilePath.Contains(".Server", StringComparison.OrdinalIgnoreCase)
+                || data.FilePath.Contains("-Server", StringComparison.OrdinalIgnoreCase))
                 platforms = "Server";
-            else if (data.FilePath.Contains(".Client", StringComparison.CurrentCultureIgnoreCase)
-                || data.FilePath.Contains("-Client", StringComparison.CurrentCultureIgnoreCase))
+            else if (data.FilePath.Contains(".Client", StringComparison.OrdinalIgnoreCase)
+                || data.FilePath.Contains("-Client", StringComparison.OrdinalIgnoreCase))
                 platforms = "Client";
 
             return $"| {data.Type} | [{filename}]({basePath}/{filename}) | {platforms} | {data.Comments} |";
