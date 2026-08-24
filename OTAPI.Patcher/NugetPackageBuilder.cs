@@ -113,7 +113,10 @@ public class NugetPackageBuilder
             packageBuilder.AddFiles(AppContext.BaseDirectory, "OTAPI.Runtime.dll", destination);
         }
 
-        var output = Path.Combine(AppContext.BaseDirectory, PackageName);
+        var packageFileName = string.IsNullOrWhiteSpace(manifest.Metadata.Id)
+            ? PackageName
+            : $"{manifest.Metadata.Id}.nupkg";
+        var output = Path.Combine(AppContext.BaseDirectory, packageFileName);
         if (File.Exists(output))
             File.Delete(output);
 
