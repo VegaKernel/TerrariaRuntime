@@ -1,0 +1,7 @@
+<Project>
+  <Target Name="CopyOTAPINet11MonoModCore" AfterTargets="Build">
+    <Copy
+      SourceFiles="$(MSBuildThisFileDirectory)..\tools\net11.0\MonoMod.Core.dll"
+      DestinationFolder="$(TargetDir)" />
+  </Target>
+</Project>

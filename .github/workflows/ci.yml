@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  DOTNET_SDK_VERSION: 11.0.100-preview.7.26381.103
+  OTAPI_TFM: net11.0
+
+jobs:
+  Server:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [
+          {
+            name: Windows,
+            runs-on: windows-latest,
+          },
+          {
+            name: Ubuntu,
+            runs-on: ubuntu-latest,
+          },
+          {
+            name: MacOS,
+            runs-on: macos-latest,
+          }
+        ]
+
+    runs-on: ${{ matrix.os.runs-on }}
+    name: ${{ matrix.os.name }} Server
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
+
+      - name: Server patch
+        run: |
+          dotnet build src/OTAPI.Patcher/OTAPI.Patcher.csproj
+          cd src/OTAPI.Patcher/bin/Debug/${{ env.OTAPI_TFM }}
+          dotnet OTAPI.Patcher.dll
+
+      - name: Server boot
+        run: |
+          dotnet build src/OTAPI.Server.Launcher/OTAPI.Server.Launcher.csproj
+          cd src/OTAPI.Server.Launcher/bin/Debug/${{ env.OTAPI_TFM }}
+          dotnet OTAPI.Server.Launcher.dll -test-init
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os.name }} NuGet Package
+          path: src/OTAPI.Patcher/bin/Debug/${{ env.OTAPI_TFM }}/OTAPI.nupkg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os.name }} Binaries
+          path: |
+            src/OTAPI.Patcher/bin/Debug/${{ env.OTAPI_TFM }}/artifact-*/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os.name }} Wiki MD files
+          path: src/OTAPI.Patcher/bin/Debug/${{ env.OTAPI_TFM }}/*.patch.md
