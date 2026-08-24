@@ -66,8 +66,7 @@ public static partial class PatchTargetExtensions
     {
         var dir = target.GetEmbeddedResourcesDirectory(fileinput);
         var extractor = new ResourceExtractor();
-        var embeddedResourcesDir = extractor.Extract(fileinput, dir);
-        return embeddedResourcesDir;
+        return extractor.Extract(fileinput, dir);
     }
 
     public static void AddPatchMetadata(this IPatchTarget target, ModFwModder modder,
@@ -75,13 +74,16 @@ public static partial class PatchTargetExtensions
         string? inputName = null)
     {
         modder.AddMetadata("OTAPI.Target", target.DisplayText);
-        if (initialModuleName != null) modder.AddMetadata("OTAPI.ModuleName", initialModuleName);
-        if (inputName != null) modder.AddMetadata("OTAPI.Input", inputName);
+        if (initialModuleName is not null)
+            modder.AddMetadata("OTAPI.ModuleName", initialModuleName);
+        if (inputName is not null)
+            modder.AddMetadata("OTAPI.Input", inputName);
     }
 
     public static void WriteCIArtifacts(this IPatchTarget target, string outputFolder)
     {
-        if (Directory.Exists(outputFolder)) Directory.Delete(outputFolder, true);
+        if (Directory.Exists(outputFolder))
+            Directory.Delete(outputFolder, true);
         Directory.CreateDirectory(outputFolder);
 
         File.Copy(Path.Combine(AppContext.BaseDirectory, "../../../../COPYING.txt"), Path.Combine(outputFolder, "COPYING.txt"));
@@ -94,64 +96,57 @@ public static partial class PatchTargetExtensions
         var commitSha = Common.GetGitCommitSha();
         var run = Environment.GetEnvironmentVariable("GITHUB_RUN_NUMBER")?.Trim();
 
-        if (!String.IsNullOrWhiteSpace(commitSha))
+        if (!string.IsNullOrWhiteSpace(commitSha))
             modder.AddMetadata("GitHub.Commit", commitSha);
 
-        if (!String.IsNullOrWhiteSpace(run))
+        if (!string.IsNullOrWhiteSpace(run))
             modder.AddMetadata("GitHub.Action.RunNo", run);
     }
 
     public static void CreateRuntimeHooks(this ModFwModder modder, string output)
     {
         modder.Log("[OTAPI] Generating OTAPI.Runtime.dll");
-        var gen = new MonoMod.RuntimeDetour.HookGen.HookGenerator(modder, "OTAPI.Runtime.dll");
-        using var srm = new MemoryStream();
-        using (ModuleDefinition mOut = gen.OutputModule)
+        var generator = new MonoMod.RuntimeDetour.HookGen.HookGenerator(modder, "OTAPI.Runtime.dll");
+        using var generated = new MemoryStream();
+        using (ModuleDefinition outputModule = generator.OutputModule)
         {
-            gen.Generate();
-
-            mOut.Write(srm);
+            generator.Generate();
+            outputModule.Write(generated);
         }
 
-        srm.Position = 0;
+        generated.Position = 0;
         var fileName = Path.GetFileName(output);
-        using var mm = new ModFwModder(new("OTAPI.Runtime"))
+        using var runtimeModder = new ModFwModder(new("OTAPI.Runtime"))
         {
-            Input = srm,
+            Input = generated,
             OutputPath = output,
             MissingDependencyThrow = false,
-            //LogVerboseEnabled = true,
-            // PublicEverything = true, // this is done in setup
-
-            GACPaths = new string[] { } // avoid MonoMod looking up the GAC, which causes an exception on .netcore
+            GACPaths = Array.Empty<string>(),
         };
-        mm.Log($"[OTAPI] Processing corelibs to be net9: {fileName}");
+        runtimeModder.Log($"[OTAPI] Relinking runtime hook assembly core libraries: {fileName}");
 
-        mm.Read();
-
-        mm.AddTask<CoreLibRelinker>();
-
-        mm.MapDependencies();
-        mm.AutoPatch();
-
-        mm.Write();
+        runtimeModder.Read();
+        runtimeModder.AddTask<CoreLibRelinker>();
+        runtimeModder.MapDependencies();
+        runtimeModder.AutoPatch();
+        runtimeModder.Write();
     }
 
     public static void AddConstants(this IModPatchTarget target, string inputName, ModFwModder modder)
     {
         var version = modder.Module.Assembly.Name.Version;
-        var const_major = $"{inputName}_V{version.Major}_{version.Minor}";
-        var const_fullname = $"{inputName}_{version.ToString().Replace(".", "_")}";
-        var const_senddatapatch = $"{inputName}_SendDataNumber{(version == new Version("1.4.3.0") ? "8" : "7")}";
-        var const_entitysource = $"{inputName}_EntitySources{(version >= new Version("1.4.3.3") ? "Active" : "Inactive")}";
+        var majorConstant = $"{inputName}_V{version.Major}_{version.Minor}";
+        var fullNameConstant = $"{inputName}_{version.ToString().Replace(".", "_", StringComparison.Ordinal)}";
+        var sendDataPatchConstant = $"{inputName}_SendDataNumber{(version == new Version("1.4.3.0") ? "8" : "7")}";
+        var entitySourceConstant = $"{inputName}_EntitySources{(version >= new Version("1.4.3.3") ? "Active" : "Inactive")}";
 
         List<string> constants = new()
         {
             inputName,
-            const_major,
-            const_fullname,
-            const_senddatapatch,
-            const_entitysource,
+            majorConstant,
+            fullNameConstant,
+            sendDataPatchConstant,
+            entitySourceConstant,
         };
 
         if (version >= new Version("1.4.4.1"))
@@ -171,67 +166,57 @@ public static partial class PatchTargetExtensions
 
         target.ModContext.ReferenceConstants.AddRange(constants.Select(x => $"#define {x}"));
 
-        File.WriteAllText("AutoGenerated.target", @$"<!-- DO NOT EDIT THIS FILE! It was auto generated by the setup project  -->
+        File.WriteAllText("AutoGenerated.target", @$"<!-- DO NOT EDIT THIS FILE! It was auto generated by the setup project -->
 <Project xmlns=""http://schemas.microsoft.com/developer/msbuild/2003"">
   <PropertyGroup>
-    <DefineConstants>{String.Join(';', constants)}</DefineConstants>
+    <DefineConstants>{string.Join(';', constants)}</DefineConstants>
   </PropertyGroup>
 </Project>");
     }
 
     public static string Patch(this IModPatchTarget target, string status, string input, string output, bool publicEverything,
         Func<ModType, ModFwModder?, EApplyResult> onApplying,
-        Action<ModFwModder, string>? print = null
-    )
+        Action<ModFwModder, string>? print = null)
     {
-        if (print is null) print = (_, str) => Console.WriteLine(str);
+        print ??= (_, str) => Console.WriteLine(str);
 
-        EApplyResult OnApplying(ModType modType, ModFwModder? modder)
-        {
-            return onApplying(modType, modder);
-        };
+        EApplyResult OnApplying(ModType modType, ModFwModder? modder) => onApplying(modType, modder);
 
         target.ModContext.OnApply += OnApplying;
         try
         {
-            using ModFwModder mm = new(target.ModContext)
+            using var modder = new ModFwModder(target.ModContext)
             {
                 InputPath = input,
                 OutputPath = output,
                 MissingDependencyThrow = false,
                 PublicEverything = publicEverything,
-
                 LogVerboseEnabled = true,
-
-                GACPaths = new string[] { }, // avoid MonoMod looking up the GAC, which causes an exception on .netcore
-
+                GACPaths = Array.Empty<string>(),
                 MarkdownDocumentor = target.MarkdownDocumentor,
-
-                //EnableWriteEvents = writeEvents,
             };
 
-            target.AddSearchDirectories(mm);
-            mm.AddTask<CoreLibRelinker>();
+            target.AddSearchDirectories(modder);
+            modder.AddTask<CoreLibRelinker>();
 
-            mm.Read();
+            modder.Read();
 
-            print(mm, $"[OTAPI] Mapping dependencies: {status}");
-            mm.MapDependencies();
+            print(modder, $"[OTAPI] Mapping dependencies: {status}");
+            modder.MapDependencies();
 
-            print(mm, $"[OTAPI] Patching: {status}");
-            mm.AutoPatch();
+            print(modder, $"[OTAPI] Patching: {status}");
+            modder.AutoPatch();
 
-            print(mm, $"[OTAPI] Writing: {status}, Path={new Uri(Environment.CurrentDirectory).MakeRelativeUri(new(mm.OutputPath))}");
+            print(modder, $"[OTAPI] Writing: {status}, Path={new Uri(Environment.CurrentDirectory).MakeRelativeUri(new Uri(modder.OutputPath))}");
 
             if (!target.GenerateSymbols)
             {
-                mm.WriterParameters.SymbolWriterProvider = null;
-                mm.WriterParameters.WriteSymbols = false;
+                modder.WriterParameters.SymbolWriterProvider = null;
+                modder.WriterParameters.WriteSymbols = false;
             }
 
-            mm.Write();
-
-            return mm.OutputPath;
+            modder.Write();
+            return modder.OutputPath;
         }
         finally
         {
