@@ -1,9 +1,12 @@
 [submodule "FNA"]
 	path = FNA
 	url = https://github.com/FNA-XNA/FNA
+	shallow = true
 [submodule "ModFramework"]
 	path = ModFramework
 	url = https://github.com/SignatureBeef/ModFramework.NET
+	shallow = true
 [submodule "MonoMod"]
 	path = MonoMod
 	url = https://github.com/MonoMod/MonoMod
+	shallow = true
