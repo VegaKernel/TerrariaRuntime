@@ -21,7 +21,7 @@ jobs:
           {
             name: PC,
             patch_target: p,
-            package_path: OTAPI.PC.nupkg,
+            package_path: VegaKernel.OTAPI.nupkg,
           },
         ]
 
@@ -62,4 +62,4 @@ jobs:
       - name: "Releasing to NuGet: ${{ matrix.profile.name }}"
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-        run: dotnet nuget push OTAPI.Patcher/bin/Debug/${{ env.OTAPI_TFM }}/${{ matrix.profile.package_path }} --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY"
+        run: dotnet nuget push OTAPI.Patcher/bin/Debug/${{ env.OTAPI_TFM }}/${{ matrix.profile.package_path }} --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
