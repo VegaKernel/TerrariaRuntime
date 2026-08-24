@@ -36,7 +36,7 @@ public class PCServerTarget : IServerPatchTarget
 
     public virtual string GetEmbeddedResourcesDirectory(string fileinput)
     {
-        return Path.Combine(ModContext.BaseDirectory, Path.GetDirectoryName(fileinput));
+        return Path.Combine(ModContext.BaseDirectory, Path.GetDirectoryName(fileinput) ?? string.Empty);
     }
 
     public virtual async Task<string> DownloadServerAsync()
@@ -51,7 +51,7 @@ public class PCServerTarget : IServerPatchTarget
     public virtual void MergeReLogic(ModFwModder modder, string embeddedResources)
     {
         var path = Directory.GetFiles(embeddedResources)
-            .Single(x => Path.GetFileName(x).Equals("ReLogic.dll", StringComparison.CurrentCultureIgnoreCase));
+            .Single(x => Path.GetFileName(x).Equals("ReLogic.dll", StringComparison.OrdinalIgnoreCase));
 
         modder.ReadMod(path);
         modder.RelinkAssembly("ReLogic");
@@ -65,7 +65,7 @@ public class PCServerTarget : IServerPatchTarget
     public virtual void CompileAndReadShims(ModFwModder modder)
     {
         var ldr = new CSharpLoader(ModContext)
-            .SetAutoLoadAssemblies(true) // calls .ReadMod
+            .SetAutoLoadAssemblies(true)
             .SetMarkdownDocumentor(MarkdownDocumentor)
             .SetModder(modder);
         ldr.AssemblyContext = ModContext.PluginLoader.AssemblyLoader;
@@ -93,17 +93,17 @@ public class PCServerTarget : IServerPatchTarget
             Console.WriteLine("[OTAPI] Extracting embedded binaries and packing into one binary...");
             var embeddedResources = this.ExtractResources(vanillaDllPath);
 
-            var putputsPath = Path.Combine(ModContext.BaseDirectory, "outputs");
-            Directory.CreateDirectory(putputsPath);
+            var outputsPath = Path.Combine(ModContext.BaseDirectory, "outputs");
+            Directory.CreateDirectory(outputsPath);
 
-            var terrariaServerDllDestination = Path.Combine(putputsPath, "TerrariaServer.dll");
+            var terrariaServerDllDestination = Path.Combine(outputsPath, "TerrariaServer.dll");
             var otapiDllDestination = Path.Combine(ModContext.BaseDirectory, "OTAPI.dll");
             var otapiRuntimeDllDestination = Path.Combine(ModContext.BaseDirectory, "OTAPI.Runtime.dll");
 
             ModContext.ReferenceFiles.AddRange(new[]
             {
                 "ModFramework.dll",
-                "MonoMod.dll",
+                "MonoMod.Patcher.dll",
                 "MonoMod.Utils.dll",
                 "MonoMod.RuntimeDetour.dll",
                 "Mono.Cecil.dll",
@@ -112,7 +112,6 @@ public class PCServerTarget : IServerPatchTarget
                 "Steamworks.NET.dll",
             });
 
-            // expose types to be public, so private IL refs can be ref'd by compiling mods
             this.Patch("Merging and pregenerating files", vanillaDllPath, terrariaServerDllDestination, PublicEverything, (modType, mm) =>
             {
                 if (mm is not null)
@@ -123,10 +122,9 @@ public class PCServerTarget : IServerPatchTarget
                     }
                     else if (modType == ModType.Read)
                     {
-                        // merge in HookResult, HookEvent etc
                         mm.ReadMod(typeof(HookEvent).Assembly.Location);
 
-                        Console.WriteLine($"[OTAPI] Changing to AnyCPU (x64 preferred)");
+                        Console.WriteLine("[OTAPI] Changing to AnyCPU (x64 preferred)");
                         mm.SetAnyCPU();
 
                         CompileAndReadShims(mm);
@@ -139,17 +137,17 @@ public class PCServerTarget : IServerPatchTarget
 
             ModContext.ReferenceFiles.Add(terrariaServerDllDestination);
 
-            // load into the current app domain for patch refs
             var asm = Assembly.LoadFile(terrariaServerDllDestination);
             var cache = new Dictionary<string, Assembly>();
 
-            Assembly? ResolvingFile(AssemblyLoadContext arg1, AssemblyName args)
+            Assembly? ResolvingFile(AssemblyLoadContext _, AssemblyName args)
             {
-                if (args.Name is null) return null;
-                if (cache.TryGetValue(args.Name, out Assembly? asmm))
-                    return asmm;
+                if (args.Name is null)
+                    return null;
+                if (cache.TryGetValue(args.Name, out Assembly? resolved))
+                    return resolved;
 
-                if (args.Name == asm.GetName().Name) //.IndexOf("TerrariaServer") > -1)
+                if (string.Equals(args.Name, asm.GetName().Name, StringComparison.Ordinal))
                 {
                     cache[args.Name] = asm;
                     return asm;
@@ -157,20 +155,19 @@ public class PCServerTarget : IServerPatchTarget
 
                 var dll = $"{args.Name}.dll";
 
-                // try tml first, its binaries override other builds
-                var tmp = Path.Combine("tModLoader", "Libraries", args.Name, "1.0.0", dll);
-                if (File.Exists(tmp))
+                var tmlPath = Path.Combine("tModLoader", "Libraries", args.Name, "1.0.0", dll);
+                if (File.Exists(tmlPath))
                 {
-                    asmm = Assembly.Load(File.ReadAllBytes(tmp));
-                    cache[args.Name] = asmm;
-                    return asmm;
+                    resolved = Assembly.Load(File.ReadAllBytes(tmlPath));
+                    cache[args.Name] = resolved;
+                    return resolved;
                 }
 
                 if (File.Exists(dll))
                 {
-                    asmm = Assembly.Load(File.ReadAllBytes(dll));
-                    cache[args.Name] = asmm;
-                    return asmm;
+                    resolved = Assembly.Load(File.ReadAllBytes(dll));
+                    cache[args.Name] = resolved;
+                    return resolved;
                 }
 
                 return null;
@@ -189,20 +186,16 @@ public class PCServerTarget : IServerPatchTarget
                         }
                         else if (modType == ModType.Read)
                         {
-                            // assembly is loaded, can use it to add in constants
-                            // before the plugins are invoked
                             this.AddConstants(vanillaName, mm);
-
                             LoadModifications();
                         }
                         else if (modType == ModType.PreWrite)
                         {
-                            mm.ModContext.TargetAssemblyName = "OTAPI"; // change the target assembly since otapi is now valid for write events
+                            mm.ModContext.TargetAssemblyName = "OTAPI";
                             AddVersion(mm);
                             this.AddPatchMetadata(mm);
                             mm.AddEnvMetadata();
 
-                            // generate static hooks
                             Console.Write("[OTAPI] Generating static hooks...");
                             mm.Module.GetType("Terraria.Main").CreateHooks(mm);
                             mm.Module.GetType("Terraria.Item").CreateHooks(mm);
@@ -216,7 +209,6 @@ public class PCServerTarget : IServerPatchTarget
                             mm.Module.GetType("Terraria.Net.NetManager").CreateHooks(mm);
                             mm.Module.GetType("Terraria.Projectile").CreateHooks(mm);
                             mm.Module.GetType("Terraria.RemoteClient").CreateHooks(mm);
-                            // mm.Module.GetType("Terraria.Liquid").CreateHooks(mm); TODO add value type hooks
                             mm.Module.GetType("Terraria.Program").CreateHooks(mm);
                             mm.Module.GetType("Terraria.Wiring").CreateHooks(mm);
                             mm.Module.GetType("Terraria.GameContent.PressurePlateHelper").CreateHooks(mm);
@@ -225,7 +217,7 @@ public class PCServerTarget : IServerPatchTarget
                         }
                         else if (modType == ModType.Write)
                         {
-                            mm.ModContext = new("OTAPI.Runtime"); // done with the context. they will be triggered again by runtime hooks if not for this
+                            mm.ModContext = new("OTAPI.Runtime");
                             mm.CreateRuntimeHooks(otapiRuntimeDllDestination);
 
                             Console.WriteLine("[OTAPI] Building NuGet package...");
@@ -268,10 +260,12 @@ public class PCServerTarget : IServerPatchTarget
 
     public virtual bool OnModFileLoading(string filepath)
     {
-        if (filepath.Contains("OTAPI.Runtime")) return true;
-        // only load "server" or "both" variants
+        if (filepath.Contains("OTAPI.Runtime", StringComparison.Ordinal))
+            return true;
+
         var filename = Path.GetFileNameWithoutExtension(filepath);
-        return !filename.Replace("-", ".").EndsWith(".Client", StringComparison.CurrentCultureIgnoreCase);
+        return !filename.Replace("-", ".", StringComparison.Ordinal)
+            .EndsWith(".Client", StringComparison.OrdinalIgnoreCase);
     }
 
     public string GetZipUrl()
@@ -289,15 +283,12 @@ public class PCServerTarget : IServerPatchTarget
             {
                 Console.Write("Download the latest binary? y/[N]: ");
 
-                //var input = Console.ReadLine().ToLower();
                 var input = Console.ReadKey(true).Key;
                 Console.WriteLine(input);
 
                 if (input == ConsoleKey.Y)
                     return FileResolver.AquireLatestBinaryUrl();
-                else if (input == ConsoleKey.N)
-                    break;
-                else if (input == ConsoleKey.Enter)
+                if (input == ConsoleKey.N || input == ConsoleKey.Enter)
                     break;
             } while (attempts-- > 0);
         }
