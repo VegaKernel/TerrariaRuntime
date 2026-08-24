@@ -33,7 +33,7 @@ jobs:
           {
             name: PC,
             patch_target: p,
-            package_path: OTAPI.PC.nupkg,
+            package_path: VegaKernel.OTAPI.nupkg,
           },
         ]
 
