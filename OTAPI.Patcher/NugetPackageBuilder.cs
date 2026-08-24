@@ -17,6 +17,7 @@ You should have received a copy of the GNU General Public License
 along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 using ModFramework;
+using Mono.Cecil;
 using System;
 using System.IO;
 using System.Linq;
@@ -29,6 +30,13 @@ namespace OTAPI.Patcher;
 [MonoMod.MonoModIgnore]
 public class NugetPackageBuilder
 {
+    private static readonly string[] ForbiddenRuntimeReferences =
+    {
+        "ModFramework",
+        "MonoMod.Patcher",
+        "MonoMod",
+    };
+
     private static string GetNugetVersionFromAssembly(Assembly assembly)
     {
         var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
@@ -57,6 +65,22 @@ public class NugetPackageBuilder
         return $"net{framework.Version.Major}.{framework.Version.Minor}";
     }
 
+    private static void ValidateRuntimeAssembly(string path)
+    {
+        using var assembly = AssemblyDefinition.ReadAssembly(path);
+        var forbidden = assembly.MainModule.AssemblyReferences
+            .Select(reference => reference.Name)
+            .Where(name => ForbiddenRuntimeReferences.Contains(name, StringComparer.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        if (forbidden.Length == 0)
+            return;
+
+        throw new InvalidOperationException(
+            $"Generated runtime assembly '{Path.GetFileName(path)}' leaked patch-time dependencies: {string.Join(", ", forbidden)}.");
+    }
+
     public string PackageName { get; set; }
     public string NuspecPath { get; set; }
 
@@ -68,6 +92,11 @@ public class NugetPackageBuilder
 
     public void Build(ModFwModder modder)
     {
+        var otapiAssemblyPath = Path.Combine(AppContext.BaseDirectory, "OTAPI.dll");
+        var runtimeAssemblyPath = Path.Combine(AppContext.BaseDirectory, "OTAPI.Runtime.dll");
+        ValidateRuntimeAssembly(otapiAssemblyPath);
+        ValidateRuntimeAssembly(runtimeAssemblyPath);
+
         var nuspecXml = File.ReadAllText(NuspecPath);
         nuspecXml = nuspecXml.Replace("[INJECT_VERSION]", Common.GetVersion(), StringComparison.Ordinal);
 
