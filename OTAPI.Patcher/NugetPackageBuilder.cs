@@ -17,7 +17,6 @@ You should have received a copy of the GNU General Public License
 along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 using ModFramework;
-using Mono.Cecil;
 using System;
 using System.IO;
 using System.Linq;
@@ -30,13 +29,21 @@ namespace OTAPI.Patcher;
 [MonoMod.MonoModIgnore]
 public class NugetPackageBuilder
 {
-    string GetNugetVersionFromAssembly(Assembly assembly)
-        => assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>().InformationalVersion;
+    private static string GetNugetVersionFromAssembly(Assembly assembly)
+    {
+        var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (string.IsNullOrWhiteSpace(version))
+            version = assembly.GetName().Version?.ToString();
+        if (string.IsNullOrWhiteSpace(version))
+            throw new InvalidOperationException($"Unable to determine package version for '{assembly.GetName().Name}'.");
 
-    string GetNugetVersionFromAssembly<TType>()
+        return version.Split('+')[0];
+    }
+
+    private static string GetNugetVersionFromAssembly<TType>()
         => GetNugetVersionFromAssembly(typeof(TType).Assembly);
 
-    static string GetTargetFramework()
+    private static string GetTargetFramework()
     {
         var frameworkName = typeof(NugetPackageBuilder).Assembly
             .GetCustomAttribute<TargetFrameworkAttribute>()?.FrameworkName;
@@ -61,57 +68,56 @@ public class NugetPackageBuilder
 
     public void Build(ModFwModder modder)
     {
-        var nuspec_xml = File.ReadAllText(NuspecPath);
-        nuspec_xml = nuspec_xml.Replace("[INJECT_VERSION]", Common.GetVersion());
+        var nuspecXml = File.ReadAllText(NuspecPath);
+        nuspecXml = nuspecXml.Replace("[INJECT_VERSION]", Common.GetVersion(), StringComparison.Ordinal);
 
         var commitSha = Common.GetGitCommitSha();
-        nuspec_xml = nuspec_xml.Replace("[INJECT_GIT_HASH]", String.IsNullOrWhiteSpace(commitSha) ? "" : $" git#{commitSha}");
+        nuspecXml = nuspecXml.Replace(
+            "[INJECT_GIT_HASH]",
+            string.IsNullOrWhiteSpace(commitSha) ? string.Empty : $" git#{commitSha}",
+            StringComparison.Ordinal);
 
         var platforms = new[] { GetTargetFramework() };
         var steamworks = modder.Module.AssemblyReferences.First(x => x.Name == "Steamworks.NET");
         var newtonsoft = modder.Module.AssemblyReferences.First(x => x.Name == "Newtonsoft.Json");
+
+        // The patcher and ModFramework are build-time tools only. The generated server package
+        // should depend exclusively on assemblies required by the patched Terraria runtime.
         var dependencies = new[]
         {
-            (typeof(ModFwModder).Assembly.GetName().Name, Version: GetNugetVersionFromAssembly<ModFwModder>()),
-            (typeof(MonoMod.MonoModder).Assembly.GetName().Name, Version: typeof(MonoMod.MonoModder).Assembly.GetName().Version.ToString()),
-            (typeof(MonoMod.RuntimeDetour.DetourBase).Assembly.GetName().Name, Version: typeof(MonoMod.RuntimeDetour.DetourBase).Assembly.GetName().Version.ToString()),
-            (steamworks.Name, Version: steamworks.Version.ToString()),
-            (newtonsoft.Name, Version: GetNugetVersionFromAssembly<Newtonsoft.Json.JsonConverter>().Split('+')[0]),
-            (Name: "System.IO.Packaging", Version: GetNugetVersionFromAssembly<System.IO.Packaging.ZipPackage>().Split('+')[0]),
+            (Name: typeof(MonoMod.RuntimeDetour.DetourBase).Assembly.GetName().Name!, Version: GetNugetVersionFromAssembly<MonoMod.RuntimeDetour.DetourBase>()),
+            (Name: steamworks.Name, Version: steamworks.Version.ToString()),
+            (Name: newtonsoft.Name, Version: GetNugetVersionFromAssembly<Newtonsoft.Json.JsonConverter>()),
+            (Name: "System.IO.Packaging", Version: GetNugetVersionFromAssembly<System.IO.Packaging.ZipPackage>()),
         };
 
-        var xml_dependency = String.Join("", dependencies.Select(dep => $"\n\t    <dependency id=\"{dep.Name}\" version=\"{dep.Version}\" />"));
-        var xml_group = String.Join("", platforms.Select(platform => $"\n\t<group targetFramework=\"{platform}\">{xml_dependency}\n\t</group>"));
-        var xml_dependencies = $"<dependencies>{xml_group}\n    </dependencies>";
+        var xmlDependency = string.Join(string.Empty, dependencies.Select(dep => $"\n\t    <dependency id=\"{dep.Name}\" version=\"{dep.Version}\" />"));
+        var xmlGroup = string.Join(string.Empty, platforms.Select(platform => $"\n\t<group targetFramework=\"{platform}\">{xmlDependency}\n\t</group>"));
+        var xmlDependencies = $"<dependencies>{xmlGroup}\n    </dependencies>";
 
-        nuspec_xml = nuspec_xml.Replace("[INJECT_DEPENDENCIES]", xml_dependencies);
+        nuspecXml = nuspecXml.Replace("[INJECT_DEPENDENCIES]", xmlDependencies, StringComparison.Ordinal);
+        nuspecXml = nuspecXml.Replace("[INJECT_YEAR]", DateTime.UtcNow.Year.ToString(), StringComparison.Ordinal);
 
-        nuspec_xml = nuspec_xml.Replace("[INJECT_YEAR]", DateTime.UtcNow.Year.ToString());
+        using var nuspec = new MemoryStream(Encoding.UTF8.GetBytes(nuspecXml));
+        var manifest = NuGet.Packaging.Manifest.ReadFrom(nuspec, validateSchema: true);
+        var packageBuilder = new NuGet.Packaging.PackageBuilder();
+        packageBuilder.Populate(manifest.Metadata);
 
-        using (var nuspec = new MemoryStream(Encoding.UTF8.GetBytes(nuspec_xml)))
+        var basePath = Path.Combine(AppContext.BaseDirectory, "../../../../");
+        packageBuilder.AddFiles(basePath, "COPYING.txt", "COPYING.txt");
+
+        foreach (var platform in platforms)
         {
-            var manifest = NuGet.Packaging.Manifest.ReadFrom(nuspec, validateSchema: true);
-            var packageBuilder = new NuGet.Packaging.PackageBuilder();
-            packageBuilder.Populate(manifest.Metadata);
-
-            var basePath = Path.Combine(AppContext.BaseDirectory, "../../../../");
-            packageBuilder.AddFiles(basePath, "COPYING.txt", "COPYING.txt");
-
-            foreach (var platform in platforms)
-            {
-                var dest = Path.Combine("lib", platform);
-                packageBuilder.AddFiles(AppContext.BaseDirectory, "OTAPI.dll", dest);
-                packageBuilder.AddFiles(AppContext.BaseDirectory, "OTAPI.Runtime.dll", dest);
-            }
-
-            var output = Path.Combine(AppContext.BaseDirectory, PackageName);
-
-            if (File.Exists(output))
-                File.Delete(output);
-
-            using (var srm = File.OpenWrite(output))
-                packageBuilder.Save(srm);
+            var destination = Path.Combine("lib", platform);
+            packageBuilder.AddFiles(AppContext.BaseDirectory, "OTAPI.dll", destination);
+            packageBuilder.AddFiles(AppContext.BaseDirectory, "OTAPI.Runtime.dll", destination);
         }
+
+        var output = Path.Combine(AppContext.BaseDirectory, PackageName);
+        if (File.Exists(output))
+            File.Delete(output);
+
+        using var packageStream = File.OpenWrite(output);
+        packageBuilder.Save(packageStream);
     }
 }
-
