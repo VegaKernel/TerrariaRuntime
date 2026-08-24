@@ -1,16 +1,15 @@
 name: "CI-NuGet"
 
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push/pull events but only for the upcoming-nuget-release branch
   push:
     branches: [ upcoming-nuget-release ]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
-jobs:
+env:
+  DOTNET_SDK_VERSION: 11.0.100-preview.7.26381.103
+  OTAPI_TFM: net11.0
 
+jobs:
   Server:
     runs-on: ubuntu-latest
     environment: CI
@@ -24,53 +23,43 @@ jobs:
             patch_target: p,
             package_path: OTAPI.PC.nupkg,
           },
-          # {
-          #   name: Mobile,
-          #   patch_target: m,
-          #   package_path: OTAPI.Mobile.nupkg,
-          # },
-          # {
-          #   name: tModLoader,
-          #   patch_target: t,
-          #   package_path: OTAPI.TML.nupkg,
-          # },
         ]
 
     name: ${{ matrix.profile.name }} Server
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
-          submodules: 'recursive'
+          submodules: recursive
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: '9.0.x'
+          dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
 
       - name: Build the project
         run: |
           dotnet build OTAPI.Mods.slnf
-          (cd OTAPI.Patcher/bin/Debug/net9.0 && exec dotnet run --project ../../../OTAPI.Patcher.csproj -patchTarget=${{ matrix.profile.patch_target }} -latest=n --framework net9.0)
+          (cd OTAPI.Patcher/bin/Debug/${{ env.OTAPI_TFM }} && exec dotnet run --project ../../../OTAPI.Patcher.csproj -patchTarget=${{ matrix.profile.patch_target }} -latest=n --framework ${{ env.OTAPI_TFM }})
           dotnet build OTAPI.Server.Launcher.slnf
-          (cd OTAPI.Server.Launcher/bin/Debug/net9.0 && exec dotnet OTAPI.Server.Launcher.dll -test-init)
+          (cd OTAPI.Server.Launcher/bin/Debug/${{ env.OTAPI_TFM }} && exec dotnet OTAPI.Server.Launcher.dll -test-init)
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.profile.name }} NuGet Package
-          path: OTAPI.Patcher/bin/Debug/net9.0/${{ matrix.profile.package_path }}
+          path: OTAPI.Patcher/bin/Debug/${{ env.OTAPI_TFM }}/${{ matrix.profile.package_path }}
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.profile.name }} Binaries
           path: |
-            OTAPI.Patcher/bin/Debug/net9.0/artifact-*/*
+            OTAPI.Patcher/bin/Debug/${{ env.OTAPI_TFM }}/artifact-*/*
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.profile.name }} Wiki MD files
-          path: OTAPI.Patcher/bin/Debug/net9.0/*.mfw.md
+          path: OTAPI.Patcher/bin/Debug/${{ env.OTAPI_TFM }}/*.mfw.md
 
       - name: "Releasing to NuGet: ${{ matrix.profile.name }}"
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-        run: dotnet nuget push OTAPI.Patcher/bin/Debug/net9.0/${{ matrix.profile.package_path }} --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY"
+        run: dotnet nuget push OTAPI.Patcher/bin/Debug/${{ env.OTAPI_TFM }}/${{ matrix.profile.package_path }} --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY"
