@@ -25,6 +25,18 @@ The package target framework is derived from the executing patcher instead of be
 
 Patch-time dependencies are deliberately not exposed as dependencies of `VegaKernel.OTAPI`. The generated server package depends only on assemblies required while the patched Terraria server is running.
 
+## Repository footprint
+
+The VegaKernel fork intentionally retains the upstream OTAPI commit ancestry so future upstream merges and rebases continue to have a common base. The inherited Git repository is therefore much larger than the current source tree; rewriting the full history solely to reduce clone object count would make upstream synchronization needlessly difficult.
+
+Large dependencies remain Git submodules and are marked `shallow = true` in `.gitmodules`. For a lightweight developer checkout prefer:
+
+```bash
+git clone --filter=blob:none --recurse-submodules --shallow-submodules https://github.com/VegaKernel/Open-Terraria-API.git
+```
+
+CI also rejects newly tracked regular files larger than 5 MiB through `scripts/check_repo_bloat.py`. Build outputs, generated packages, archives and large binaries belong in GitHub Actions artifacts, Releases, external packages or submodules rather than the repository history.
+
 ## MonoMod / ModFramework boundary
 
 The upstream OTAPI stack combined `ModFramework 1.1.15`, legacy `MonoMod 22.7.31.1`, and a newer RuntimeDetour. To make those generations coexist, upstream rewrote `MonoMod.dll` with Cecil at patcher startup.
