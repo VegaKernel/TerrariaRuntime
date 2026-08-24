@@ -15,7 +15,7 @@ The fork intentionally supports one target: the PC dedicated server.
 - SDK: `11.0.100-preview.7.26381.103`, pinned by `global.json`
 - Terraria server: `1.4.5.8`
 - Package ID: `TerrariaRuntime`
-- Package version: `1.0.0`
+- Package version: `1.0.1`
 - Runtime hooks: `MonoMod.RuntimeDetour 25.3.6`
 
 Client patching, graphics runtimes, mobile and tModLoader targets, and dynamic
@@ -44,7 +44,7 @@ Successful patching produces:
 - `src/TerrariaRuntime.Patcher/bin/Debug/net11.0/artifact-pc/`
 
 NuGet publication uses GitHub Actions Trusted Publishing when a matching
-`v1.0.0` tag is pushed. No long-lived NuGet API key is stored in the repository.
+`v1.0.1` tag publishes the current package. No long-lived NuGet API key is stored in the repository.
 
 See [the .NET 11 baseline](docs/NET11.md) for dependency and validation rules.
 

@@ -124,7 +124,7 @@ public class CoreLibRelinker : TypeRelinker
         }
 
         // add a new one
-        var ctor = Modder.Module.ImportReference(Modder.FindType(typeof(System.Runtime.Versioning.TargetFrameworkAttribute).FullName).Resolve().FindMethod("System.Void .ctor(System.String)"));
+        var ctor = Modder.Module.ImportReference(Modder.FindType("System.Runtime.Versioning.TargetFrameworkAttribute").Resolve().FindMethod("System.Void .ctor(System.String)"));
         Modder.Module.Assembly.CustomAttributes.Add(new(ctor)
         {
             ConstructorArguments =

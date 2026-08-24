@@ -164,9 +164,10 @@ public class AssemblyPatcher : MonoMod.MonoModder, IRelinkProvider
 
     public override void PatchEvent(TypeDefinition targetType, EventDefinition srcEvent, HashSet<MethodDefinition>? propMethods = null)
     {
-        base.PatchEvent(targetType, srcEvent, propMethods);
+        base.PatchEvent(targetType, srcEvent, propMethods!);
 
-        EventDefinition targetEvent = targetType.FindEvent(srcEvent.Name);
+        var targetEvent = targetType.FindEvent(srcEvent.Name)
+            ?? throw new InvalidOperationException($"Patched event {targetType.FullName}::{srcEvent.Name} was not created.");
 
         RunTasks(t => t.Relink(targetEvent));
         RunTasks(t => t.Relink(srcEvent));
@@ -216,7 +217,7 @@ public class AssemblyPatcher : MonoMod.MonoModder, IRelinkProvider
         for (int i = 0; i < method.MethodReturnType.CustomAttributes.Count; i++)
         {
             CustomAttribute attribute = method.MethodReturnType.CustomAttributes[i]
-                .Relink(Relinker, method);
+                .Relink((token, context) => Relinker(token, context!), method);
             method.MethodReturnType.CustomAttributes[i] = attribute;
             PatchRefsInCustomAttribute(attribute, method);
         }
@@ -259,7 +260,7 @@ public class AssemblyPatcher : MonoMod.MonoModder, IRelinkProvider
 
         RunTasks(t => t.PreWrite());
 
-        base.Write(output, outputPath);
+        base.Write(output!, outputPath!);
 
         PatchContext.Apply(PatchStage.Write, this);
     }

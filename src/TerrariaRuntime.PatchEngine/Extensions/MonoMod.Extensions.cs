@@ -78,10 +78,10 @@ public static class MonoModExtensions
 
     public static void RemoveWhile(this ILCursor cursor, Func<Instruction, bool> condition, bool removeAfterCondition = true)
     {
-        while (condition(cursor.Next))
+        while (cursor.Next is { } next && condition(next))
             cursor.Remove();
 
-        if (removeAfterCondition)
+        if (removeAfterCondition && cursor.Next is not null)
             cursor.Remove();
     }
 

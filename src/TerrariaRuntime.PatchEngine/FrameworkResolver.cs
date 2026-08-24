@@ -129,7 +129,8 @@ public class DefaultFrameworkResolver : IFrameworkResolver
 
         var repository = Repository.Factory.GetCoreV3("https://api.nuget.org/v3/index.json");
 
-        var resource = await repository.GetResourceAsync<FindPackageByIdResource>();
+        var resource = await repository.GetResourceAsync<FindPackageByIdResource>()
+            ?? throw new InvalidOperationException("NuGet did not provide a package lookup resource.");
 
         var versions = (
             await resource.GetAllVersionsAsync(

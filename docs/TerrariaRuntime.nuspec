@@ -17,7 +17,7 @@
     </description>
     <summary>TerrariaRuntime [INJECT_VERSION] for Terraria 1.4.5.8[INJECT_GIT_HASH]</summary>
     <releaseNotes>
-      TerrariaRuntime 1.0.0 - Terraria 1.4.5.8 server baseline on .NET 11.
+      TerrariaRuntime 1.0.1 - clean .NET 11 build diagnostics and stricter patch-engine null invariants.
     </releaseNotes>
     <tags>Terraria,TerrariaRuntime</tags>
     [INJECT_DEPENDENCIES]

@@ -39,7 +39,7 @@ namespace MonoMod.RuntimeDetour.HookGen
         static HookGenerator()
         {
             foreach (var pair in ReflTypeNameMap)
-                TypeNameMap[pair.Key.FullName] = pair.Value;
+                TypeNameMap[pair.Key.FullName ?? pair.Key.Name] = pair.Value;
         }
 
         public MonoModder Modder;
@@ -50,7 +50,7 @@ namespace MonoMod.RuntimeDetour.HookGen
         public string NamespaceIL;
         public bool HookOrig;
         public bool HookPrivate;
-        public string HookExtName;
+        public string HookExtName = string.Empty;
 
         public ModuleDefinition module_RuntimeDetour;
         public ModuleDefinition module_Utils;
@@ -92,22 +92,26 @@ namespace MonoMod.RuntimeDetour.HookGen
             OutputModule.AssemblyReferences.AddRange(modder.Module.AssemblyReferences);
             modder.DependencyMap[OutputModule] = new List<ModuleDefinition>(modder.DependencyMap[modder.Module]);
 
-            Namespace = Environment.GetEnvironmentVariable("MONOMOD_HOOKGEN_NAMESPACE");
-            if (string.IsNullOrEmpty(Namespace))
+            Namespace = Environment.GetEnvironmentVariable("MONOMOD_HOOKGEN_NAMESPACE") ?? "On";
+            if (Namespace.Length == 0)
                 Namespace = "On";
-            NamespaceIL = Environment.GetEnvironmentVariable("MONOMOD_HOOKGEN_NAMESPACE_IL");
-            if (string.IsNullOrEmpty(NamespaceIL))
+            NamespaceIL = Environment.GetEnvironmentVariable("MONOMOD_HOOKGEN_NAMESPACE_IL") ?? "IL";
+            if (NamespaceIL.Length == 0)
                 NamespaceIL = "IL";
             HookOrig = Environment.GetEnvironmentVariable("MONOMOD_HOOKGEN_ORIG") == "1";
             HookPrivate = Environment.GetEnvironmentVariable("MONOMOD_HOOKGEN_PRIVATE") == "1";
 
             modder.MapDependency(modder.Module, "MonoMod.RuntimeDetour");
-            if (!modder.DependencyCache.TryGetValue("MonoMod.RuntimeDetour", out module_RuntimeDetour))
+            if (!modder.DependencyCache.TryGetValue("MonoMod.RuntimeDetour", out var runtimeDetourModule)
+                || runtimeDetourModule is null)
                 throw new FileNotFoundException("MonoMod.RuntimeDetour not found!");
+            module_RuntimeDetour = runtimeDetourModule;
 
             modder.MapDependency(modder.Module, "MonoMod.Utils");
-            if (!modder.DependencyCache.TryGetValue("MonoMod.Utils", out module_Utils))
+            if (!modder.DependencyCache.TryGetValue("MonoMod.Utils", out var utilsModule)
+                || utilsModule is null)
                 throw new FileNotFoundException("MonoMod.Utils not found!");
+            module_Utils = utilsModule;
 
             t_MulticastDelegate = OutputModule.ImportReference(modder.FindType("System.MulticastDelegate"));
             t_IAsyncResult = OutputModule.ImportReference(modder.FindType("System.IAsyncResult"));
@@ -153,7 +157,7 @@ namespace MonoMod.RuntimeDetour.HookGen
             }
         }
 
-        public void GenerateFor(TypeDefinition type, out TypeDefinition hookType, out TypeDefinition hookILType)
+        public void GenerateFor(TypeDefinition type, out TypeDefinition? hookType, out TypeDefinition? hookILType)
         {
             hookType = hookILType = null;
 
@@ -168,14 +172,14 @@ namespace MonoMod.RuntimeDetour.HookGen
             Modder.LogVerbose($"[HookGen] Generating for type {type.FullName}");
 
             hookType = new TypeDefinition(
-                type.IsNested ? null : (Namespace + (string.IsNullOrEmpty(type.Namespace) ? "" : ("." + type.Namespace))),
+                type.IsNested ? string.Empty : (Namespace + (string.IsNullOrEmpty(type.Namespace) ? "" : ("." + type.Namespace))),
                 type.Name,
                 (type.IsNested ? TypeAttributes.NestedPublic : TypeAttributes.Public) | TypeAttributes.Abstract | TypeAttributes.Sealed | TypeAttributes.Class,
                 OutputModule.TypeSystem.Object
             );
 
             hookILType = new TypeDefinition(
-                type.IsNested ? null : (NamespaceIL + (string.IsNullOrEmpty(type.Namespace) ? "" : ("." + type.Namespace))),
+                type.IsNested ? string.Empty : (NamespaceIL + (string.IsNullOrEmpty(type.Namespace) ? "" : ("." + type.Namespace))),
                 type.Name,
                 (type.IsNested ? TypeAttributes.NestedPublic : TypeAttributes.Public) | TypeAttributes.Abstract | TypeAttributes.Sealed | TypeAttributes.Class,
                 OutputModule.TypeSystem.Object
@@ -221,7 +225,7 @@ namespace MonoMod.RuntimeDetour.HookGen
                 suffix = false;
             }
 
-            IEnumerable<MethodDefinition> overloads = null;
+            IEnumerable<MethodDefinition> overloads = Enumerable.Empty<MethodDefinition>();
             if (suffix)
             {
                 overloads = method.DeclaringType.Methods.Where(other => !other.HasGenericParameters && HookGenerator.GetFriendlyName(other) == name && other != method);
@@ -277,9 +281,11 @@ namespace MonoMod.RuntimeDetour.HookGen
 
             var delHook = GenerateDelegateFor(method);
             delHook.Name = "hook_" + name;
-            var delHookInvoke = delHook.FindMethod("Invoke");
+            var delHookInvoke = delHook.FindMethod("Invoke")
+                ?? throw new InvalidOperationException("Generated hook delegate has no Invoke method.");
             delHookInvoke.Parameters.Insert(0, new ParameterDefinition("orig", ParameterAttributes.None, delOrig));
-            var delHookBeginInvoke = delHook.FindMethod("BeginInvoke");
+            var delHookBeginInvoke = delHook.FindMethod("BeginInvoke")
+                ?? throw new InvalidOperationException("Generated hook delegate has no BeginInvoke method.");
             delHookBeginInvoke.Parameters.Insert(0, new ParameterDefinition("orig", ParameterAttributes.None, delOrig));
             delHook.CustomAttributes.Add(GenerateEditorBrowsable(EditorBrowsableState.Never));
             hookType.NestedTypes.Add(delHook);
@@ -518,7 +524,7 @@ namespace MonoMod.RuntimeDetour.HookGen
             }
         }
 
-        static bool IsPublic(TypeDefinition typeDef)
+        static bool IsPublic(TypeDefinition? typeDef)
         {
             return typeDef != null && (typeDef.IsNestedPublic || typeDef.IsPublic) && !typeDef.IsNotPublic;
         }
@@ -572,7 +578,8 @@ namespace MonoMod.RuntimeDetour.HookGen
                 if (type.IsEnum)
                 {
                     // ... try the enum's underlying type.
-                    typeRef = type.FindField("value__").FieldType;
+                    typeRef = type.FindField("value__")?.FieldType
+                        ?? throw new InvalidOperationException($"Enum {type.FullName} has no value__ field.");
                     break;
                 }
 
