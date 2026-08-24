@@ -263,7 +263,7 @@ public class PCServerTarget : IServerPatchTarget
 
     public virtual void RemoveFilters()
     {
-        ModContext.PluginLoader.OnModFileLoading += OnModFileLoading;
+        ModContext.PluginLoader.OnModFileLoading -= OnModFileLoading;
     }
 
     public virtual bool OnModFileLoading(string filepath)
