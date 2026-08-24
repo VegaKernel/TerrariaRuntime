@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'ModFramework' Or '$(MSBuildProjectName)' == 'ModFramework.Modules.CSharp'">
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <PackOnBuild>false</PackOnBuild>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'ModFramework'">
+    <PackageReference Remove="MonoMod" />
+    <PackageReference Include="MonoMod.Patcher" Version="$(MonoModPatcherVersion)" />
+  </ItemGroup>
+</Project>
