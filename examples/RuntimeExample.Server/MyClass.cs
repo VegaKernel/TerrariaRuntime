@@ -18,33 +18,39 @@ along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 
 using System;
-using System.Runtime.InteropServices;
-using ModFramework;
 
 namespace RuntimeExample.Server;
 
+/// <summary>
+/// Minimal server consumer example. The host calls <see cref="Initialize"/> during its own module startup.
+/// OTAPI no longer provides a second runtime plugin loader on the Vega dedicated-server path.
+/// </summary>
 public static class Hooks
 {
-    [Modification(ModType.Runtime, "Loading Runtime Example!")]
-    public static void OnRunning()
-    {
-        Console.WriteLine("[RuntimeExample Server] Hello World! from a compiled DLL");
+    private static bool initialized;
 
-        if (RuntimeInformation.ProcessArchitecture != Architecture.Arm64)
-            On.Terraria.NetMessage.greetPlayer += MonoMod_greetPlayer;
-        else
-            HookEvents.Terraria.NetMessage.greetPlayer += Modfw_greetPlayer;
+    public static void Initialize()
+    {
+        if (initialized)
+            return;
+
+        initialized = true;
+        Console.WriteLine("[RuntimeExample Server] Initializing direct OTAPI hooks");
+        On.Terraria.NetMessage.greetPlayer += GreetPlayer;
     }
 
-    private static void MonoMod_greetPlayer(On.Terraria.NetMessage.orig_greetPlayer orig, int plr)
+    public static void Shutdown()
     {
-        Console.WriteLine($"[RuntimeExample Server] Greet player: {plr}");
-        orig(plr);
+        if (!initialized)
+            return;
+
+        On.Terraria.NetMessage.greetPlayer -= GreetPlayer;
+        initialized = false;
     }
 
-    private static void Modfw_greetPlayer(object sender, HookEvents.Terraria.NetMessage.greetPlayerEventArgs args)
+    private static void GreetPlayer(On.Terraria.NetMessage.orig_greetPlayer orig, int playerIndex)
     {
-        Console.WriteLine($"[RuntimeExample Server] Greet player: {args.plr}");
-        args.OriginalMethod(args.plr);
+        Console.WriteLine($"[RuntimeExample Server] Greet player: {playerIndex}");
+        orig(playerIndex);
     }
 }
