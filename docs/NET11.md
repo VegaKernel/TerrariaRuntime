@@ -1,8 +1,8 @@
 # .NET 11 dedicated-server baseline
 
-This OTAPI 4.0.0 distribution is server-only and targets Terraria 1.4.5.8.
+This TerrariaRuntime 1.0.0 distribution is server-only and targets Terraria 1.4.5.8.
 The authoritative target is `net11.0` with SDK
-`11.0.100-preview.7.26381.103` and package ID `OTAPI`.
+`11.0.100-preview.7.26381.103` and package ID `TerrariaRuntime`.
 
 ## Removed legacy surface
 
@@ -16,7 +16,7 @@ The fork no longer contains or supports:
 - MonoMod 22.x compatibility rewriting and the old HookGen package.
 
 The official dedicated server still exposes some XNA-shaped value types in
-gameplay signatures. `src/OTAPI.Scripts/Shims/Xna` supplies those small managed
+gameplay signatures. `src/TerrariaRuntime.Scripts/Shims/Xna` supplies those small managed
 types without FNA or a graphics runtime. The server map subsystem is removed by
 the dedicated-server patch set. Client-only resource-pack metadata is stripped;
 localization, world-generation metadata and Creative-mode data remain because
@@ -24,13 +24,13 @@ dedicated-server code consumes them.
 
 ## Patch engine
 
-`OTAPI.PatchEngine` is a private, non-packable build tool owned by this
+`TerrariaRuntime.PatchEngine` is a private, non-packable build tool owned by this
 repository. It contains the relinking, hook emission, resource extraction,
 patch discovery and build-time C# compilation needed by the retained server
 patches. The original GPLv3 notices are retained.
 
-The generated `OTAPI.dll` and `OTAPI.Runtime.dll` must not reference
-`OTAPI.PatchEngine`, patch-time MonoMod components, FNA or a client launcher.
+The generated `TerrariaRuntime.dll` and `TerrariaRuntime.Hooks.dll` must not reference
+`TerrariaRuntime.PatchEngine`, patch-time MonoMod components, FNA or a client launcher.
 `NugetPackageBuilder` enforces the patch-time dependency part of this boundary
 before creating a package.
 
@@ -59,9 +59,9 @@ Every change to the fork must:
 
 1. restore and build the patcher with the pinned .NET 11 SDK;
 2. download/patch the pinned official Terraria server successfully;
-3. generate `OTAPI.dll`, `OTAPI.Runtime.dll` and `OTAPI.nupkg`;
+3. generate `TerrariaRuntime.dll`, `TerrariaRuntime.Hooks.dll` and `TerrariaRuntime.nupkg`;
 4. reject patch-time, FNA and client references in generated assemblies;
-5. build `OTAPI.Server.Launcher` and complete its `-test-init` smoke;
+5. build `TerrariaRuntime.Server.Launcher` and complete its `-test-init` smoke;
 6. load the local package from a clean `net11.0` consumer;
 7. run consumer world/network/hook/shutdown tests before changing the package
    reference.

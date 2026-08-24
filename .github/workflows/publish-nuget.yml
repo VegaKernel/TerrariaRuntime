@@ -11,11 +11,11 @@ permissions:
 
 env:
   DOTNET_SDK_VERSION: 11.0.100-preview.7.26381.103
-  OTAPI_TFM: net11.0
+  TERRARIA_RUNTIME_TFM: net11.0
 
 jobs:
   publish:
-    name: Build, validate and publish OTAPI
+    name: Build, validate and publish TerrariaRuntime
     runs-on: ubuntu-latest
 
     steps:
@@ -25,24 +25,24 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
 
-      - name: Build OTAPI patcher
-        run: dotnet build src/OTAPI.Patcher/OTAPI.Patcher.csproj
+      - name: Build TerrariaRuntime patcher
+        run: dotnet build src/TerrariaRuntime.Patcher/TerrariaRuntime.Patcher.csproj
 
-      - name: Patch Terraria server and create OTAPI.nupkg
-        working-directory: src/OTAPI.Patcher/bin/Debug/${{ env.OTAPI_TFM }}
-        run: dotnet OTAPI.Patcher.dll
+      - name: Patch Terraria server and create TerrariaRuntime.nupkg
+        working-directory: src/TerrariaRuntime.Patcher/bin/Debug/${{ env.TERRARIA_RUNTIME_TFM }}
+        run: dotnet TerrariaRuntime.Patcher.dll
 
       - name: Validate server startup
         run: |
-          dotnet build src/OTAPI.Server.Launcher/OTAPI.Server.Launcher.csproj
-          dotnet src/OTAPI.Server.Launcher/bin/Debug/${{ env.OTAPI_TFM }}/OTAPI.Server.Launcher.dll -test-init
+          dotnet build src/TerrariaRuntime.Server.Launcher/TerrariaRuntime.Server.Launcher.csproj
+          dotnet src/TerrariaRuntime.Server.Launcher/bin/Debug/${{ env.TERRARIA_RUNTIME_TFM }}/TerrariaRuntime.Server.Launcher.dll -test-init
 
       - name: Verify tag and package version
         shell: bash
         run: |
-          package="src/OTAPI.Patcher/bin/Debug/${OTAPI_TFM}/OTAPI.nupkg"
+          package="src/TerrariaRuntime.Patcher/bin/Debug/${TERRARIA_RUNTIME_TFM}/TerrariaRuntime.nupkg"
           tag_version="${GITHUB_REF_NAME#v}"
-          package_version="$(unzip -p "$package" OTAPI.nuspec | sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p')"
+          package_version="$(unzip -p "$package" TerrariaRuntime.nuspec | sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p')"
           test "$package_version" = "$tag_version"
 
       - name: Authenticate to NuGet.org with Trusted Publishing
@@ -51,9 +51,9 @@ jobs:
         with:
           user: kidlok
 
-      - name: Publish OTAPI
+      - name: Publish TerrariaRuntime
         run: >-
           dotnet nuget push
-          src/OTAPI.Patcher/bin/Debug/${{ env.OTAPI_TFM }}/OTAPI.nupkg
+          src/TerrariaRuntime.Patcher/bin/Debug/${{ env.TERRARIA_RUNTIME_TFM }}/TerrariaRuntime.nupkg
           --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}"
           --source https://www.nuget.org/api/v2/package

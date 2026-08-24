@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<package>
+  <metadata>
+    <id>TerrariaRuntime</id>
+    <title>TerrariaRuntime</title>
+    <version>[INJECT_VERSION]</version>
+    <authors>VegaKernel and TerrariaRuntime contributors</authors>
+    <owners>VegaKernel</owners>
+    <license type="file">LICENSE</license>
+    <projectUrl>https://github.com/VegaKernel/TerrariaRuntime</projectUrl>
+    <repository type="git" url="https://github.com/VegaKernel/TerrariaRuntime" />
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>
+        TerrariaRuntime is a low-level Terraria integration layer that rewrites the official server assembly and exposes generated runtime hooks. It is derived from Open Terraria API and carries a server-only .NET 11 baseline with narrowly scoped compatibility and performance work.
+
+        The server package targets .NET 11 and provides the TerrariaRuntime and TerrariaRuntime.Hooks assemblies.
+    </description>
+    <summary>TerrariaRuntime [INJECT_VERSION] for Terraria 1.4.5.8[INJECT_GIT_HASH]</summary>
+    <releaseNotes>
+      TerrariaRuntime 1.0.0 - Terraria 1.4.5.8 server baseline on .NET 11.
+    </releaseNotes>
+    <tags>Terraria,TerrariaRuntime</tags>
+    [INJECT_DEPENDENCIES]
+  </metadata>
+</package>

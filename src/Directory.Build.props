@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
     <LangVersion>preview</LangVersion>
-    <OTAPITargetFramework>net11.0</OTAPITargetFramework>
+    <TerrariaRuntimeTargetFramework>net11.0</TerrariaRuntimeTargetFramework>
     <DotNetPreviewPackageVersion>11.0.0-preview.7.26381.103</DotNetPreviewPackageVersion>
     <MonoModPatcherVersion>25.0.1</MonoModPatcherVersion>
     <MonoModRuntimeDetourVersion>25.3.6</MonoModRuntimeDetourVersion>

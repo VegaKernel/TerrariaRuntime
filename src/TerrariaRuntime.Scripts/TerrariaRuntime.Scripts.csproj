@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<TargetFramework>$(TerrariaRuntimeTargetFramework)</TargetFramework>
+		<PreserveCompilationReferences>true</PreserveCompilationReferences>
+		<PreserveCompilationContext>true</PreserveCompilationContext>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<Nullable>enable</Nullable>
+	</PropertyGroup>
+	<ItemGroup>
+		<Reference Include="TerrariaRuntime" Condition="Exists('../TerrariaRuntime.Patcher/bin/Debug/$(TargetFramework)/TerrariaRuntime.exe')">
+			<HintPath>../TerrariaRuntime.Patcher/bin/Debug/$(TargetFramework)/TerrariaRuntime.exe</HintPath>
+		</Reference>
+		<Reference Include="TerrariaRuntime" Condition="Exists('../TerrariaRuntime.Patcher/bin/Debug/$(TargetFramework)/TerrariaRuntime.dll')">
+			<HintPath>../TerrariaRuntime.Patcher/bin/Debug/$(TargetFramework)/TerrariaRuntime.dll</HintPath>
+		</Reference>
+		<Reference Include="TerrariaRuntime.Hooks" Condition="Exists('../TerrariaRuntime.Patcher/bin/Debug/$(TargetFramework)/TerrariaRuntime.Hooks.dll')">
+			<HintPath>../TerrariaRuntime.Patcher/bin/Debug/$(TargetFramework)/TerrariaRuntime.Hooks.dll</HintPath>
+		</Reference>
+		<Reference Include="Steamworks.NET" Condition="Exists('../TerrariaRuntime.Patcher/bin/Debug/$(TargetFramework)/EmbeddedResources/Steamworks.NET.dll')">
+			<HintPath>../TerrariaRuntime.Patcher/bin/Debug/$(TargetFramework)/EmbeddedResources/Steamworks.NET.dll</HintPath>
+		</Reference>
+	</ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\TerrariaRuntime.PatchEngine\TerrariaRuntime.PatchEngine.csproj" />
+		<PackageReference Include="Steamworks.NET" Version="2024.8.0" />
+		<PackageReference Include="MonoMod.Patcher" Version="$(MonoModPatcherVersion)" />
+	</ItemGroup>
+	<ItemGroup>
+		<Folder Include="Modules\TerrariaRuntime.Mods\Resources\" />
+	</ItemGroup>
+	<Target Name="CleanAll" AfterTargets="Clean">
+		<RemoveDir Directories="$(OUTDIR)" />
+	</Target>
+</Project>
