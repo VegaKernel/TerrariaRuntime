@@ -5,5 +5,10 @@
     <DotNetPreviewPackageVersion>11.0.0-preview.7.26381.103</DotNetPreviewPackageVersion>
     <MonoModPatcherVersion>25.0.1</MonoModPatcherVersion>
     <MonoModRuntimeDetourVersion>25.3.6</MonoModRuntimeDetourVersion>
+
+    <!-- MonoMod's published 25.x buildTransitive guard still rejects TFMs above net10.
+         The .NET 11 support work is tracked upstream in MonoMod PR #307 and is not
+         released yet. Keep this explicit until a released MonoMod build supports net11. -->
+    <MonoMod_ReallySkipCheckTargetRuntime>true</MonoMod_ReallySkipCheckTargetRuntime>
   </PropertyGroup>
 </Project>
