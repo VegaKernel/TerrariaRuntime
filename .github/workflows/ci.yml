@@ -45,6 +45,9 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Repository bloat guard
+        run: python scripts/check_repo_bloat.py
+
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
