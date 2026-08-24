@@ -4,3 +4,6 @@
 [submodule "ModFramework"]
 	path = ModFramework
 	url = https://github.com/SignatureBeef/ModFramework.NET
+[submodule "MonoMod"]
+	path = MonoMod
+	url = https://github.com/MonoMod/MonoMod
