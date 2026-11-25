@@ -52,6 +52,9 @@ jobs:
           cd src/TerrariaRuntime.Server.Launcher/bin/Debug/${{ env.TERRARIA_RUNTIME_TFM }}
           dotnet TerrariaRuntime.Server.Launcher.dll -test-init
 
+      - name: Generated hook semantics and allocation smoke
+        run: dotnet run --project tests/HookEmitterSmoke/HookEmitterSmoke.csproj -c Release -p:RuntimeAssemblyPath="${{ github.workspace }}/src/TerrariaRuntime.Patcher/bin/Debug/${{ env.TERRARIA_RUNTIME_TFM }}/TerrariaRuntime.dll"
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os.name }} NuGet Package

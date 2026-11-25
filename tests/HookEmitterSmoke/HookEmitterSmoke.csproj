@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net11.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RuntimeAssemblyPath Condition="'$(RuntimeAssemblyPath)' == ''">$(MSBuildThisFileDirectory)..\..\src\TerrariaRuntime.Patcher\bin\Debug\net11.0\TerrariaRuntime.dll</RuntimeAssemblyPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <Reference Include="TerrariaRuntime">
+      <HintPath>$(RuntimeAssemblyPath)</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

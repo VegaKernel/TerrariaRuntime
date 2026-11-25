@@ -8,6 +8,10 @@ because the package does not bundle the wrapper and its platform-specific
 dependencies. A host that supplies compatible native files can opt in by
 setting `Netplay.UseGNS` before startup. The default TCP path does not need them.
 
+### Generated hook overhead
+
+Since 1.1.4 a generated method wrapper reads one subscriber snapshot. If no handlers are registered, it forwards the original arguments directly and returns the native result without constructing hook arguments or an original-method delegate. The subscribed path uses the captured multicast delegate; the existing public `Invoke...` signature is preserved. A handler added or removed concurrently is observed on subsequent calls, not halfway through the captured multicast invocation. The `tests/HookEmitterSmoke` project exercises real generated wrappers (static and instance, ref/out, return, cancellation, explicit original call and unsubscribe) and checks allocations on unobserved calls. CI and the publication workflow run this smoke after generation.
+
 | Boundary | Integration | Constraint |
 | --- | --- | --- |
 | Dedicated TCP listener | Set `Hooks.Netplay.ServerTcpListenerFactory` before `Netplay.StartServer`. Return an `ISocket` listener that owns accepted sockets. Null keeps `CreateTcpListener` and the vanilla socket fallback. | This replaces only the dedicated TCP listener. LAN discovery, Steam and GameNetworkingSockets are separate paths. Preserve callback order, send-buffer lifetime and disconnect semantics. |

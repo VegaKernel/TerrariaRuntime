@@ -346,20 +346,24 @@ public static class HookEmitter
         return hookDelegate;
     }
 
-    /// <summary>
-    /// Creates an event in the hook type for the method.
-    /// </summary>
-    /// <param name="hookType">The type to receive the method being created</param>
-    /// <param name="eventField">The event to fire</param>
-    /// <param name="hookEventArgsType">The event args</param>
-    /// <param name="modder">The monomodder instance</param>
-    /// <param name="instanceType">Optional/Nullable instance type</param>
-    /// <param name="originalMethodDelegate">The delegate for the original method</param>
-    /// <param name="name">Optional name to call the method</param>
-    /// <returns>The definition of the invoke method that was created</returns>
+    /// <summary>Reads the event delegate once without constructing any hook arguments.</summary>
+    static MethodDefinition CreateReadSubscribersMethod(TypeDefinition hookType, FieldDefinition eventField)
+    {
+        var method = new MethodDefinition($"Get{eventField.Name}SubscriberSnapshot",
+            MethodAttributes.Assembly | MethodAttributes.HideBySig | MethodAttributes.Static, eventField.FieldType);
+        var il = method.Body.GetILProcessor();
+        il.Emit(OpCodes.Volatile);
+        il.Emit(OpCodes.Ldsfld, eventField);
+        il.Emit(OpCodes.Ret);
+        hookType.Methods.Add(method);
+        return method;
+    }
+
+    /// <summary>Creates the subscribed invocation path and the public compatibility invoker.</summary>
     static MethodDefinition CreateInvokeMethod(
         TypeDefinition hookType,
         FieldDefinition eventField,
+        MethodDefinition readSubscribers,
         TypeDefinition hookEventArgsType,
         MonoModder modder,
         TypeReference? instanceType,
@@ -370,8 +374,8 @@ public static class HookEmitter
 
         // Define the `Invoke` method
         MethodDefinition invokeMethod = new(
-            methodName,
-            MethodAttributes.Public | MethodAttributes.HideBySig | MethodAttributes.Static,
+            methodName + "WithSubscribers",
+            MethodAttributes.Assembly | MethodAttributes.HideBySig | MethodAttributes.Static,
             hookEventArgsType
         );
 
@@ -394,6 +398,9 @@ public static class HookEmitter
             ParameterDefinition prm = new(field.Name, ParameterAttributes.None, fieldType);
             invokeMethod.Parameters.Add(prm);
         }
+
+        var subscribers = new ParameterDefinition("subscriberSnapshot", ParameterAttributes.None, eventField.FieldType);
+        invokeMethod.Parameters.Add(subscribers);
 
         // Create a GenericInstanceType for EventHandler<HookEventArgsType>
         var eventHandlerType = instanceType is not null ? GetOrCreateHookDelegate(modder) : modder.ResolveTypeReference(typeof(EventHandler<>));
@@ -437,7 +444,7 @@ public static class HookEmitter
         il.Emit(OpCodes.Stfld, hookEventArgsType.Fields.Single(x => x.Name == OriginalMethodName)); // Set the field
 
         // Set the fields of the event args instance
-        foreach (var prm in invokeMethod.Parameters.Skip(1 /*sender*/ + 1 /*method*/))
+        foreach (var prm in invokeMethod.Parameters.Skip(1 /*sender*/ + 1 /*method*/).SkipLast(1 /*subscriber snapshot*/))
         {
             il.Emit(OpCodes.Dup);                           // Load the event args instance
             il.Emit(OpCodes.Ldarg, prm);                    // Load the parameter
@@ -446,11 +453,11 @@ public static class HookEmitter
         il.Emit(OpCodes.Stloc_0);                           // Store the event args instance
 
         // Check if the event is not null
-        il.Emit(OpCodes.Ldsfld, eventField);                // Load the static event field
+        il.Emit(OpCodes.Ldarg, subscribers);               // Use one immutable delegate snapshot
         il.Emit(OpCodes.Brfalse, returnLabel);              // If null, skip invocation
 
         // Invoke the event delegate
-        il.Emit(OpCodes.Ldsfld, eventField);                // Load the static event field
+        il.Emit(OpCodes.Ldarg, subscribers);
         il.Emit(OpCodes.Ldarg_0);                           // Load the sender
         il.Emit(OpCodes.Ldloc_0);                           // Load the event args instance
         il.Emit(OpCodes.Callvirt, invokeMethodReference);   // Call the Invoke method on the delegate
@@ -462,6 +469,19 @@ public static class HookEmitter
         // Add the Invoke method to the type
         hookType.Methods.Add(invokeMethod);
 
+        // Preserve the existing public Invoke API for callers that explicitly dispatch a hook.
+        var publicInvoker = new MethodDefinition(methodName,
+            MethodAttributes.Public | MethodAttributes.HideBySig | MethodAttributes.Static, hookEventArgsType);
+        foreach (var parameter in invokeMethod.Parameters.SkipLast(1))
+            publicInvoker.Parameters.Add(new ParameterDefinition(parameter.Name, parameter.Attributes, parameter.ParameterType));
+        var publicIl = publicInvoker.Body.GetILProcessor();
+        foreach (var parameter in publicInvoker.Parameters)
+            publicIl.Emit(OpCodes.Ldarg, parameter);
+        publicIl.Emit(OpCodes.Call, readSubscribers);
+        publicIl.Emit(OpCodes.Call, invokeMethod);
+        publicIl.Emit(OpCodes.Ret);
+        hookType.Methods.Add(publicInvoker);
+
         return invokeMethod;
     }
 
@@ -472,7 +492,7 @@ public static class HookEmitter
     /// <param name="eventInvoke">The events invoke method definition</param>
     /// <param name="name">Optional/Nullable name for the created method</param>
     /// <returns>The newly created methods definition</returns>
-    static MethodDefinition CreateReplacement(MethodDefinition original, MethodDefinition eventInvoke, string? name = null)
+    static MethodDefinition CreateReplacement(MethodDefinition original, MethodDefinition eventInvoke, MethodDefinition readSubscribers, string? name = null)
     {
         var eventArgs = eventInvoke.ReturnType.Resolve();
         var hookReturnValueField = eventArgs.Fields.SingleOrDefault(x => x.Name == HookReturnValueName);
@@ -494,6 +514,23 @@ public static class HookEmitter
 
         VariableDefinition eventArgsVariable = new(eventInvoke.ReturnType);
         methodDefinition.Body.Variables.Add(eventArgsVariable);
+
+        // Unobserved hooks are common on the world/tile hot path. Preserve vanilla argument
+        // handling directly, including ref/out aliasing, without allocating args or a delegate.
+        VariableDefinition subscriberSnapshot = new(readSubscribers.ReturnType);
+        methodDefinition.Body.Variables.Add(subscriberSnapshot);
+        var observed = il.Create(OpCodes.Nop);
+        il.Emit(OpCodes.Call, readSubscribers);
+        il.Emit(OpCodes.Dup);
+        il.Emit(OpCodes.Stloc, subscriberSnapshot);
+        il.Emit(OpCodes.Brtrue, observed);
+        if (!original.IsStatic)
+            il.Emit(OpCodes.Ldarg_0);
+        foreach (var parameter in methodDefinition.Parameters)
+            il.Emit(OpCodes.Ldarg, parameter);
+        il.Emit(OpCodes.Call, original);
+        il.Emit(OpCodes.Ret);
+        il.Append(observed);
 
         // if any out parameters, initialise them with default values
         foreach (var param in methodDefinition.Parameters.Where(x => x.IsOut))
@@ -522,6 +559,7 @@ public static class HookEmitter
             }
         }
 
+        il.Emit(OpCodes.Ldloc, subscriberSnapshot);
         il.Emit(OpCodes.Call, eventInvoke);
 
         // store the event args in a local variable
@@ -601,9 +639,10 @@ public static class HookEmitter
         hookEventArgs.Fields.Add(new FieldDefinition(OriginalMethodName, FieldAttributes.Public, originalMethodDelegate));
 
         var (hookField, _) = definition.CreateEvent(hookType, hookEventArgs, modder, name: uniqueName);
-        var newMethod = CreateInvokeMethod(hookType, hookField, hookEventArgs, modder, definition.IsStatic ? null : definition.DeclaringType, originalMethodDelegate, name: $"Invoke{uniqueName}");
+        var readSubscribers = CreateReadSubscribersMethod(hookType, hookField);
+        var newMethod = CreateInvokeMethod(hookType, hookField, readSubscribers, hookEventArgs, modder, definition.IsStatic ? null : definition.DeclaringType, originalMethodDelegate, name: $"Invoke{uniqueName}");
 
-        var replacement = CreateReplacement(definition, newMethod, name: $"{HookMethodNamePrefix}{definition.Name}");
+        var replacement = CreateReplacement(definition, newMethod, readSubscribers, name: $"{HookMethodNamePrefix}{definition.Name}");
         definition.DeclaringType.Methods.Add(replacement);
 
         // remove any overrides etc

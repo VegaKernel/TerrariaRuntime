@@ -1,6 +1,6 @@
 # .NET 11 dedicated-server baseline
 
-This TerrariaRuntime 1.1.3 distribution is server-only and targets Terraria 1.4.6.1.
+This TerrariaRuntime 1.1.4 distribution is server-only and targets Terraria 1.4.6.1.
 The authoritative target is `net11.0` with SDK
 `11.0.100` and package ID `TerrariaRuntime`.
 
