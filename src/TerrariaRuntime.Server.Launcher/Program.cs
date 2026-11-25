@@ -228,8 +228,8 @@ static void ValidateServerFrameBudget()
     var client = new Terraria.RemoteClient { Id = slot };
     var frames = new List<byte>();
     var socket = new Terraria.Net.Sockets.TcpSocket();
-    int activated = 0, closing = 0, closed = 0, entering = 0;
-    bool preservedConnection = false;
+    int activated = 0, beforeWorldData = 0, closing = 0, closed = 0, entering = 0;
+    bool preservedConnection = false, initialCharacterObserved = false;
     var order = new List<string>();
     void OnActivated(int id, Terraria.Net.Sockets.ISocket connection)
     {
@@ -239,6 +239,15 @@ static void ValidateServerFrameBudget()
     {
         if (id == slot && ReferenceEquals(connection, socket) && client.State == 10)
         { entering++; order.Add("entering"); }
+    }
+    void OnBeforeWorldData(int id, Terraria.Net.Sockets.ISocket connection)
+    {
+        if (id == slot && ReferenceEquals(connection, socket) && client.State == 2)
+        {
+            beforeWorldData++;
+            initialCharacterObserved = Terraria.Main.player[slot].statLife == 87 && Terraria.Main.player[slot].name == "lifecycle-character";
+            order.Add("world-data");
+        }
     }
     void OnClosing(int id, Terraria.Net.Sockets.ISocket connection)
     {
@@ -266,6 +275,7 @@ static void ValidateServerFrameBudget()
         Terraria.NetMessage.buffer[slot] = new Terraria.MessageBuffer { whoAmI = slot };
         client.Reset();
         Hooks.Netplay.ServerConnectionActivated += OnActivated;
+        Hooks.Netplay.ServerPlayerBeforeWorldData += OnBeforeWorldData;
         Hooks.Netplay.ServerPlayerEnteringWorld += OnEnteringWorld;
         Hooks.Netplay.ServerConnectionClosing += OnClosing;
         Hooks.Netplay.ServerConnectionClosed += OnClosed;
@@ -286,12 +296,25 @@ static void ValidateServerFrameBudget()
         Hooks.Netplay.NotifyServerPlayerEnteringWorld(slot);
         if (entering != 0)
             throw new InvalidOperationException("An unconnected slot must not emit a world entry notification.");
+        client.State = 1;
+        Hooks.Netplay.NotifyServerPlayerBeforeWorldData(slot);
+        client.State = 2;
+        Terraria.Main.netMode = 0;
+        Hooks.Netplay.NotifyServerPlayerBeforeWorldData(slot);
+        Terraria.Main.netMode = 2;
+        if (beforeWorldData != 0)
+            throw new InvalidOperationException("The early world-data notification requires the server's initial character state.");
+        Terraria.Main.player[slot].statLife = 87;
+        Terraria.Main.player[slot].name = "lifecycle-character";
+        Hooks.Netplay.NotifyServerPlayerBeforeWorldData(slot);
         client.State = 10;
+        Hooks.Netplay.NotifyServerPlayerBeforeWorldData(slot);
         Hooks.Netplay.NotifyServerPlayerEnteringWorld(slot);
         client.Data["lifecycle-smoke"] = true;
         client.Reset();
-        if (activated != 1 || entering != 1 || closing != 1 || closed != 1 || !preservedConnection || client.Data.ContainsKey("lifecycle-smoke") ||
-            !order.SequenceEqual(new[] { "activated", "entering", "closing", "closed" }))
+        if (activated != 1 || beforeWorldData != 1 || !initialCharacterObserved || entering != 1 || closing != 1 || closed != 1 ||
+            !preservedConnection || client.Data.ContainsKey("lifecycle-smoke") ||
+            !order.SequenceEqual(new[] { "activated", "world-data", "entering", "closing", "closed" }))
             throw new InvalidOperationException("Connection lifecycle must expose the original connection before reset, then close in order.");
     }
     finally
@@ -299,6 +322,7 @@ static void ValidateServerFrameBudget()
         Hooks.NetMessage.ServerFrameBudget = null;
         Hooks.MessageBuffer.GetData -= RecordFrame;
         Hooks.Netplay.ServerConnectionActivated -= OnActivated;
+        Hooks.Netplay.ServerPlayerBeforeWorldData -= OnBeforeWorldData;
         Hooks.Netplay.ServerPlayerEnteringWorld -= OnEnteringWorld;
         Hooks.Netplay.ServerConnectionClosing -= OnClosing;
         Hooks.Netplay.ServerConnectionClosed -= OnClosed;

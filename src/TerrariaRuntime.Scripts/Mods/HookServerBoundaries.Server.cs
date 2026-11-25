@@ -59,13 +59,36 @@ void HookServerBoundaries(AssemblyPatcher modder)
     reset.Body.OptimizeMacros();
 
     var packet = GetMethod("Terraria.MessageBuffer", "GetData");
+    var packetIl = packet.Body.GetILProcessor();
+    // A stock client sends initial character data before RequestWorldData. The
+    // first server transition State 1 -> 2 is directly followed by WorldData.
+    // Additional world-info sends bypass the state store and must bypass this hook.
+    var beforeWorldData = packet.Body.Instructions.Single(instruction =>
+        Field(instruction, OpCodes.Stfld, "Terraria.RemoteClient", "State")
+        && instruction.Previous.OpCode == OpCodes.Ldc_I4 && (int)instruction.Previous.Operand == 2);
+    var sendWorldData = beforeWorldData.Next;
+    var skipInitialWorldData = packet.Body.Instructions.Single(instruction =>
+        instruction.OpCode == OpCodes.Bne_Un && ReferenceEquals(instruction.Operand, sendWorldData));
+    var worldDataCall = packet.Body.Instructions.SkipWhile(instruction => instruction != sendWorldData)
+        .First(instruction => instruction.OpCode == OpCodes.Call || instruction.OpCode == OpCodes.Callvirt);
+    if (!Field(skipInitialWorldData.Previous.Previous, OpCodes.Ldfld, "Terraria.RemoteClient", "State") ||
+        skipInitialWorldData.Previous.OpCode != OpCodes.Ldc_I4 || (int)skipInitialWorldData.Previous.Operand != 1 ||
+        sendWorldData.OpCode != OpCodes.Ldc_I4 || (int)sendWorldData.Operand != 7 ||
+        !Calls(worldDataCall, "Terraria.NetMessage", "TrySendData"))
+        throw new InvalidOperationException("Unexpected initial world-data transition.");
+    var worldDataBuffer = Instruction.Create(OpCodes.Ldarg_0);
+    var worldDataSlot = Instruction.Create(OpCodes.Ldfld, packet.DeclaringType.Fields.Single(field => field.Name == "whoAmI"));
+    packetIl.InsertAfter(beforeWorldData, worldDataBuffer);
+    packetIl.InsertAfter(worldDataBuffer, worldDataSlot);
+    packetIl.InsertAfter(worldDataSlot, Instruction.Create(OpCodes.Call,
+        modder.GetMethodDefinition(() => TerrariaRuntime.Hooks.Netplay.NotifyServerPlayerBeforeWorldData(default))));
+
     // The dedicated player's first world entry is the vanilla transition to
     // State 10. Notify after the state store but before the initial sync/greeting.
     // Branches which bypass this store must also bypass the notification.
     var enteringWorld = packet.Body.Instructions.Single(instruction =>
         Field(instruction, OpCodes.Stfld, "Terraria.RemoteClient", "State")
         && instruction.Previous.OpCode == OpCodes.Ldc_I4 && (int)instruction.Previous.Operand == 10);
-    var packetIl = packet.Body.GetILProcessor();
     var enteringWorldBuffer = Instruction.Create(OpCodes.Ldarg_0);
     var enteringWorldSlot = Instruction.Create(OpCodes.Ldfld, packet.DeclaringType.Fields.Single(field => field.Name == "whoAmI"));
     packetIl.InsertAfter(enteringWorld, enteringWorldBuffer);
@@ -210,6 +233,8 @@ namespace TerrariaRuntime
             public static Func<ISocket, bool> ServerConnectionAdmission { get; set; }
             public static event Action<int, ISocket> ServerConnectionActivated;
             public static event Action<int, ISocket> ServerConnectionClosed;
+            /// <summary>Notifies once on the initial world-data transition, before sending the world's information.</summary>
+            public static event Action<int, ISocket> ServerPlayerBeforeWorldData;
             /// <summary>Notifies after the server's initial connected-state transition, before initial player sync.</summary>
             public static event Action<int, ISocket> ServerPlayerEnteringWorld;
 
@@ -243,6 +268,14 @@ namespace TerrariaRuntime
             }
 
             public static ISocket GetServerConnectionSocket(global::Terraria.RemoteClient client) => client.Socket;
+
+            public static void NotifyServerPlayerBeforeWorldData(int slot)
+            {
+                if (global::Terraria.Main.dedServ && global::Terraria.Main.netMode == 2
+                    && (uint)slot < (uint)global::Terraria.Netplay.Clients.Length
+                    && global::Terraria.Netplay.Clients[slot] is { State: 2, Socket: { } socket })
+                    NotifyLifecycle(ServerPlayerBeforeWorldData, slot, socket);
+            }
 
             public static void NotifyServerPlayerEnteringWorld(int slot)
             {

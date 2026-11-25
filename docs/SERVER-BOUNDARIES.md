@@ -17,9 +17,17 @@ setting `Netplay.UseGNS` before startup. The default TCP path does not need them
 
 ### Connection and player lifecycle
 
-`Hooks.Netplay` exposes four connection notifications (all `Action<int, ISocket>`):
+`Hooks.Netplay` exposes five connection notifications (all `Action<int, ISocket>`):
 
 * `ServerConnectionActivated`: the socket has been installed in the native slot.
+* `ServerPlayerBeforeWorldData`: the initial server-side state transition from 1
+  to 2 has occurred, immediately before the first WorldData response. A stock
+  client submits its initial appearance, health, mana, equipment and inventory
+  state before this transition. The notification runs on the world thread, once
+  on the native transition; later world-data requests do not repeat it. This is
+  an SSC capture/preparation boundary, **not** proof that incoming data is
+  complete, trustworthy, or authenticated. Do not block the world thread on
+  storage I/O; authentication and asynchronous admission remain host policy.
 * `ServerPlayerEnteringWorld`: the game's initial connection state reaches 10,
   on the world thread and before vanilla's initial player sync and greeting.
   This is not an authentication decision; registration, SSC policy and account
@@ -31,7 +39,7 @@ setting `Netplay.UseGNS` before startup. The default TCP path does not need them
 * `ServerConnectionClosed`: the original socket is passed after vanilla reset.
 
 The socket identity must accompany the slot in lifecycle consumers so a delayed
-close cannot discard newer connection state. Closing and entering-world events
+close cannot discard newer connection state. Closing, before-world-data and entering-world events
 are notifications, not veto callbacks: observer exceptions are logged and
 vanilla continues. Reset can occur outside the running world loop, so hosts
 should still check world-thread ownership before reading mutable player data.
