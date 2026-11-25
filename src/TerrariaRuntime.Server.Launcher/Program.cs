@@ -27,6 +27,8 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 
 Console.WriteLine($"TerrariaRuntime.Server.Launcher Arch: {RuntimeInformation.ProcessArchitecture}");
+bool testInit = args.Any(x => string.Equals(x, "-test-init", StringComparison.OrdinalIgnoreCase));
+bool validationPassed = false;
 
 static Assembly GetTerrariaAssembly() => typeof(Terraria.Animation).Assembly;
 
@@ -137,14 +139,15 @@ static void Main_ctor(On.Terraria.Main.orig_ctor orig, Terraria.Main self)
     Console.WriteLine($"Main invoked, random number: {Terraria.Main.rand.Next()}");
 }
 
-static void Main_DedServ(object? sender, HookEvents.Terraria.Main.DedServEventArgs e)
+void Main_DedServ(object? sender, HookEvents.Terraria.Main.DedServEventArgs e)
 {
     Console.WriteLine("Server init process successful");
 
-    if (Environment.GetCommandLineArgs().Any(x => string.Equals(x, "-test-init", StringComparison.OrdinalIgnoreCase)))
+    if (testInit)
     {
-        ValidateNetworkHooks();
         e.ContinueExecution = false;
+        ValidateNetworkHooks();
+        validationPassed = true;
     }
 }
 
@@ -176,6 +179,7 @@ static void ValidateNetworkHooks()
             throw new InvalidOperationException("Server packet pass override did not replace exactly one pass.");
 
         ValidateServerFrameBudget();
+        ValidateConnectionAdmission();
     }
     finally
     {
@@ -186,13 +190,53 @@ static void ValidateNetworkHooks()
     Console.WriteLine("Server network hooks successful");
 }
 
+static void ValidateConnectionAdmission()
+{
+    var queue = new System.Collections.Concurrent.ConcurrentQueue<Terraria.Net.Sockets.ISocket>();
+    Terraria.Net.Sockets.ISocket accepted = new Terraria.Net.Sockets.TcpSocket();
+    Terraria.Net.Sockets.ISocket excess = new Terraria.Net.Sockets.TcpSocket();
+    Terraria.Net.Sockets.ISocket denied = new Terraria.Net.Sockets.TcpSocket();
+    try
+    {
+        Hooks.Netplay.ServerPendingConnectionLimit = 1;
+        Hooks.Netplay.ServerConnectionAdmission = socket => !ReferenceEquals(socket, denied);
+        Hooks.Netplay.EnqueueServerConnection(queue, accepted);
+        Hooks.Netplay.EnqueueServerConnection(queue, excess);
+        if (!queue.TryDequeue(out var entry) || !ReferenceEquals(entry, accepted) || !queue.IsEmpty)
+            throw new InvalidOperationException("The pending connection queue must retain only the admitted socket.");
+        Hooks.Netplay.EnqueueServerConnection(queue, denied);
+        if (!queue.IsEmpty)
+            throw new InvalidOperationException("A rejected socket must not enter the pending queue.");
+    }
+    finally
+    {
+        Hooks.Netplay.ServerPendingConnectionLimit = 0;
+        Hooks.Netplay.ServerConnectionAdmission = null;
+        accepted.Close();
+        excess.Close();
+        denied.Close();
+    }
+}
+
 static void ValidateServerFrameBudget()
 {
     const int slot = 0;
     var oldClient = Terraria.Netplay.Clients[slot];
+    var oldBuffer = Terraria.NetMessage.buffer[slot];
+    var oldPlayer = Terraria.Main.player[slot];
     var oldNetMode = Terraria.Main.netMode;
     var client = new Terraria.RemoteClient { Id = slot };
     var frames = new List<byte>();
+    var socket = new Terraria.Net.Sockets.TcpSocket();
+    int activated = 0, closed = 0;
+    void OnActivated(int id, Terraria.Net.Sockets.ISocket connection)
+    {
+        if (id == slot && ReferenceEquals(connection, socket)) activated++;
+    }
+    void OnClosed(int id, Terraria.Net.Sockets.ISocket connection)
+    {
+        if (id == slot && ReferenceEquals(connection, socket)) closed++;
+    }
     void RecordFrame(object? sender, Hooks.MessageBuffer.GetDataEventArgs args)
     {
         frames.Add(args.PacketId);
@@ -203,8 +247,11 @@ static void ValidateServerFrameBudget()
     {
         Terraria.Main.netMode = 2;
         Terraria.Netplay.Clients[slot] = client;
+        Terraria.NetMessage.buffer[slot] = new Terraria.MessageBuffer { whoAmI = slot };
         client.Reset();
-        client.Activate(new Terraria.Net.Sockets.TcpSocket());
+        Hooks.Netplay.ServerConnectionActivated += OnActivated;
+        Hooks.Netplay.ServerConnectionClosed += OnClosed;
+        client.Activate(socket);
         Hooks.MessageBuffer.GetData += RecordFrame;
         Hooks.NetMessage.ServerFrameBudget = _ => 1;
         Terraria.NetMessage.ReceiveBytes(new byte[] { 3, 0, 1, 3, 0, 2, 3, 0 }, 8, slot);
@@ -218,12 +265,19 @@ static void ValidateServerFrameBudget()
         Terraria.NetMessage.CheckBytes(slot);
         if (!frames.SequenceEqual(new byte[] { 1, 2, 3 }))
             throw new InvalidOperationException("Deferred frames must keep their wire order.");
+        client.Reset();
+        if (activated != 1 || closed != 1)
+            throw new InvalidOperationException("Connection activation and close hooks must fire exactly once.");
     }
     finally
     {
         Hooks.NetMessage.ServerFrameBudget = null;
         Hooks.MessageBuffer.GetData -= RecordFrame;
-        client.Reset();
+        Hooks.Netplay.ServerConnectionActivated -= OnActivated;
+        Hooks.Netplay.ServerConnectionClosed -= OnClosed;
+        if (client.Socket is not null) client.Reset();
+        Terraria.NetMessage.buffer[slot] = oldBuffer;
+        Terraria.Main.player[slot] = oldPlayer;
         Terraria.Netplay.Clients[slot] = oldClient;
         Terraria.Main.netMode = oldNetMode;
     }
@@ -263,3 +317,4 @@ AppDomain.CurrentDomain.AssemblyResolve += (_, resolveArgs) =>
 var entryPoint = terrariaAssembly.EntryPoint
     ?? throw new InvalidOperationException("Patched Terraria assembly does not expose an entry point.");
 entryPoint.Invoke(null, new object[] { args });
+return testInit && !validationPassed ? 1 : 0;
