@@ -1,8 +1,8 @@
 # .NET 11 dedicated-server baseline
 
-This TerrariaRuntime 1.0.1 distribution is server-only and targets Terraria 1.4.5.8.
+This TerrariaRuntime 1.1.0 distribution is server-only and targets Terraria 1.4.6.1.
 The authoritative target is `net11.0` with SDK
-`11.0.100-preview.7.26381.103` and package ID `TerrariaRuntime`.
+`11.0.100` and package ID `TerrariaRuntime`.
 
 ## Removed legacy surface
 
@@ -40,10 +40,10 @@ The source retains MonoMod's MIT notice.
 
 ## MonoMod .NET 11 exception
 
-Published MonoMod 25.x packages still carry a build-transitive target that
-rejects target frameworks newer than .NET 10. The fork explicitly opts past
-that package guard while using current `MonoMod.Patcher 25.0.1` and
-`MonoMod.RuntimeDetour 25.3.6`:
+The build-time `MonoMod.Patcher 25.0.1` package predates .NET 11, so the build
+retains its package-guard override. At runtime, `MonoMod.RuntimeDetour
+25.4.0-prerelease.3` and `MonoMod.Core 1.4.0-prerelease.3` provide `net11.0`
+assets. The old locally rebuilt Preview 7 core is no longer used:
 
 ```xml
 <MonoMod_ReallySkipCheckTargetRuntime>true</MonoMod_ReallySkipCheckTargetRuntime>

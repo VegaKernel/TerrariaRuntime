@@ -146,7 +146,7 @@ public class NugetPackageBuilder
             (Name: newtonsoft.Name, Version: "13.0.4"),
             (Name: "System.IO.Packaging", Version: GetNugetVersionFromAssembly<System.IO.Packaging.ZipPackage>()),
             (Name: "System.Configuration.ConfigurationManager", Version: GetNugetVersionFromAssembly<System.Configuration.ConfigurationErrorsException>()),
-            (Name: "System.Drawing.Common", Version: "11.0.0-preview.7.26381.103"),
+            (Name: "System.Drawing.Common", Version: GetNugetVersionFromAssembly(Assembly.Load("System.Drawing.Common"))),
         };
 
         var xmlDependency = string.Join(string.Empty, dependencies.Select(dep => $"\n\t    <dependency id=\"{dep.Name}\" version=\"{dep.Version}\" />"));
@@ -169,10 +169,7 @@ public class NugetPackageBuilder
             var destination = Path.Combine("lib", platform);
             packageBuilder.AddFiles(AppContext.BaseDirectory, "TerrariaRuntime.dll", destination);
             packageBuilder.AddFiles(AppContext.BaseDirectory, "TerrariaRuntime.Hooks.dll", destination);
-            packageBuilder.AddFiles(basePath, "src/ThirdParty/MonoMod.Core.dll", Path.Combine("tools", platform));
         }
-        packageBuilder.AddFiles(basePath, "src/ThirdParty/TerrariaRuntime.targets", "buildTransitive");
-        packageBuilder.AddFiles(basePath, "src/ThirdParty/MonoMod.LICENSE", "THIRD_PARTY_NOTICES");
 
         var packageFileName = string.IsNullOrWhiteSpace(manifest.Metadata.Id)
             ? PackageName

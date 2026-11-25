@@ -22,17 +22,42 @@ using Mono.Cecil;
 using Mono.Cecil.Cil;
 using MonoMod;
 using System;
+using System.Linq;
 using Terraria.Net.Sockets;
 
 /// <summary>
-/// @doc Creates Hooks.Netplay.CreateTcpListener. Allows custom TCP implementations to be used.
+/// @doc Exposes the dedicated server TCP factory and the main-thread packet pass.
 /// </summary>
 [Patch(PatchStage.PreMerge, "Hooking tcp interfaces")]
 [MonoMod.MonoModIgnore]
 void HookClientSockets(AssemblyPatcher modder)
 {
     var callback = modder.GetMethodDefinition(() => TerrariaRuntime.Hooks.Netplay.InvokeCreateTcpListener());
+    var serverCallback = modder.GetMethodDefinition(() => TerrariaRuntime.Hooks.Netplay.InvokeCreateServerTcpListener());
     var tcpSocket = modder.GetDefinition<TcpSocket>();
+    var netplay = modder.Module.GetType("Terraria.Netplay");
+    var serverInit = netplay.Methods.Single(method => method.Name == "InitializeServer" && method.IsStatic);
+    var serverListenerAllocation = serverInit.Body.Instructions.Single(instruction =>
+        instruction.OpCode == OpCodes.Newobj && instruction.Operand is MethodReference constructor
+        && constructor.DeclaringType.FullName == tcpSocket.FullName && constructor.Parameters.Count == 0);
+    serverListenerAllocation.OpCode = OpCodes.Call;
+    serverListenerAllocation.Operand = serverCallback;
+
+    var netplayInitializer = netplay.Methods.Single(method => method.IsConstructor && method.IsStatic);
+    var useGnsStore = netplayInitializer.Body.Instructions.Single(instruction =>
+        instruction.OpCode == OpCodes.Stsfld && instruction.Operand is FieldReference field
+        && field.DeclaringType.FullName == netplay.FullName && field.Name == "UseGNS");
+    if (useGnsStore.Previous?.OpCode != OpCodes.Ldc_I4_1)
+        throw new InvalidOperationException("Expected vanilla Netplay.UseGNS to default to true.");
+    useGnsStore.Previous.OpCode = OpCodes.Ldc_I4_0;
+
+    var packetPass = netplay.Methods.Single(method => method.Name == "UpdateServerInMainThread" && method.IsStatic);
+    var tryPacketPass = modder.GetMethodDefinition(() => TerrariaRuntime.Hooks.Netplay.TryInvokeServerPacketPass());
+    var vanillaPacketPass = packetPass.Body.Instructions[0];
+    var il = packetPass.Body.GetILProcessor();
+    il.InsertBefore(vanillaPacketPass, Instruction.Create(OpCodes.Call, tryPacketPass));
+    il.InsertBefore(vanillaPacketPass, Instruction.Create(OpCodes.Brfalse, vanillaPacketPass));
+    il.InsertBefore(vanillaPacketPass, Instruction.Create(OpCodes.Ret));
     modder.OnRewritingMethodBody += (MonoModder modder, MethodBody body, Instruction instr, int instri) =>
     {
         if (instr.OpCode == OpCodes.Newobj
@@ -57,6 +82,21 @@ namespace TerrariaRuntime
     {
         public static partial class Netplay
         {
+            public static Func<ISocket> ServerTcpListenerFactory { get; set; }
+            public static Action ServerPacketPass { get; set; }
+
+            public static ISocket InvokeCreateServerTcpListener() =>
+                ServerTcpListenerFactory?.Invoke() ?? InvokeCreateTcpListener();
+
+            public static bool TryInvokeServerPacketPass()
+            {
+                var replacement = ServerPacketPass;
+                if (replacement is null)
+                    return false;
+                replacement();
+                return true;
+            }
+
             public class CreateTcpListenerEventArgs : EventArgs
             {
                 public ISocket Result { get; set; }

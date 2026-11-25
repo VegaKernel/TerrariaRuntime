@@ -10,7 +10,7 @@ permissions:
   id-token: write
 
 env:
-  DOTNET_SDK_VERSION: 11.0.100-preview.7.26381.103
+  DOTNET_SDK_VERSION: 11.0.100
   TERRARIA_RUNTIME_TFM: net11.0
 
 jobs:

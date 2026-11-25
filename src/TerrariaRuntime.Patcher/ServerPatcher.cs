@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.Loader;
+using System.Security.Cryptography;
 using System.Threading.Tasks;
 using static TerrariaRuntime.PatchEngine.PatchContext;
 
@@ -36,15 +37,16 @@ internal sealed class ServerPatcher
 
     public async Task<string> DownloadServerAsync()
     {
-        const string serverUrl = "https://terraria.org/api/download/pc-dedicated-server/terraria-server-1458.zip";
+        const string serverUrl = "https://terraria.org/api/download/pc-dedicated-server/terraria-server-1461.zip";
+        const string expectedHash = "E6D7DB36E8ABABC465490743E03F46F3C76D2FCDB757239E60A2B139A92F03A1";
         var zipPath = await Common.DownloadZipAsync(serverUrl);
         var extracted = Common.ExtractZip(zipPath);
-
-        return Directory.EnumerateFiles(extracted, "TerrariaServer.exe", SearchOption.AllDirectories)
-            .Single(path => string.Equals(
-                Path.GetFileName(Path.GetDirectoryName(path)),
-                "Windows",
-                StringComparison.OrdinalIgnoreCase));
+        var server = Path.Combine(extracted, "1461", "Windows", "TerrariaServer.exe");
+        using var input = File.OpenRead(server);
+        var actualHash = Convert.ToHexString(SHA256.HashData(input));
+        if (actualHash != expectedHash)
+            throw new InvalidDataException($"Unexpected Terraria 1.4.6.1 Windows server SHA-256: {actualHash}.");
+        return server;
     }
 
     public void MergeReLogic(AssemblyPatcher modder, string embeddedResources)
@@ -110,6 +112,7 @@ internal sealed class ServerPatcher
         Common.AddMarkdownFormatter();
 
         var vanillaDllPath = await DownloadServerAsync();
+        var vanillaDirectory = Path.GetFullPath(Path.GetDirectoryName(vanillaDllPath)!);
             Console.WriteLine("[TerrariaRuntime] Extracting embedded binaries and packing into one binary...");
             var embeddedResources = this.ExtractResources(vanillaDllPath);
 
@@ -138,6 +141,7 @@ internal sealed class ServerPatcher
                     if (modType == PatchStage.PreRead)
                     {
                         mm.AssemblyResolver.AddSearchDirectory(embeddedResources);
+                        mm.AssemblyResolver.AddSearchDirectory(vanillaDirectory);
                     }
                     else if (modType == PatchStage.Read)
                     {
@@ -148,6 +152,8 @@ internal sealed class ServerPatcher
 
                         CompileAndReadShims(mm);
                         MergeReLogic(mm, embeddedResources);
+                        mm.ReadMod(Path.Combine(vanillaDirectory, "OpenNAT.dll"));
+                        mm.RelinkAssembly("OpenNAT");
                         this.AddPatchMetadata(mm, mm.Module.Name, vanillaDllPath);
                     }
                 }

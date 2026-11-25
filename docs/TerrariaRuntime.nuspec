@@ -15,9 +15,9 @@
 
         The server package targets .NET 11 and provides the TerrariaRuntime and TerrariaRuntime.Hooks assemblies.
     </description>
-    <summary>TerrariaRuntime [INJECT_VERSION] for Terraria 1.4.5.8[INJECT_GIT_HASH]</summary>
+    <summary>TerrariaRuntime [INJECT_VERSION] for Terraria 1.4.6.1[INJECT_GIT_HASH]</summary>
     <releaseNotes>
-      TerrariaRuntime 1.0.1 - clean .NET 11 build diagnostics and stricter patch-engine null invariants.
+      TerrariaRuntime 1.1.0 - Terraria 1.4.6.1, .NET 11, dedicated TCP listener and packet-pass overrides.
     </releaseNotes>
     <tags>Terraria,TerrariaRuntime</tags>
     [INJECT_DEPENDENCIES]

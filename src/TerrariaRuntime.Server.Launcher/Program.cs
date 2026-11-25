@@ -142,7 +142,91 @@ static void Main_DedServ(object? sender, HookEvents.Terraria.Main.DedServEventAr
     Console.WriteLine("Server init process successful");
 
     if (Environment.GetCommandLineArgs().Any(x => string.Equals(x, "-test-init", StringComparison.OrdinalIgnoreCase)))
+    {
+        ValidateNetworkHooks();
         e.ContinueExecution = false;
+    }
+}
+
+static void ValidateNetworkHooks()
+{
+    if (Terraria.Netplay.UseGNS)
+        throw new InvalidOperationException("The package must start without native GNS libraries.");
+
+    var legacyListener = new Terraria.Net.Sockets.TcpSocket();
+    var serverListener = new Terraria.Net.Sockets.TcpSocket();
+    void CreateLegacyListener(object? sender, Hooks.Netplay.CreateTcpListenerEventArgs args) => args.Result = legacyListener;
+
+    int packetPassCalls = 0;
+    Hooks.Netplay.CreateTcpListener += CreateLegacyListener;
+    try
+    {
+        Hooks.Netplay.ServerTcpListenerFactory = () => serverListener;
+        if (!ReferenceEquals(Hooks.Netplay.InvokeCreateServerTcpListener(), serverListener))
+            throw new InvalidOperationException("Dedicated TCP listener override was not used.");
+
+        Hooks.Netplay.ServerTcpListenerFactory = null;
+        if (!ReferenceEquals(Hooks.Netplay.InvokeCreateServerTcpListener(), legacyListener))
+            throw new InvalidOperationException("Legacy TCP listener fallback was not used.");
+
+        Hooks.Netplay.ServerPacketPass = () => packetPassCalls++;
+        Terraria.Netplay.UpdateServerInMainThread();
+        Hooks.Netplay.ServerPacketPass = null;
+        if (packetPassCalls != 1 || Hooks.Netplay.TryInvokeServerPacketPass())
+            throw new InvalidOperationException("Server packet pass override did not replace exactly one pass.");
+
+        ValidateServerFrameBudget();
+    }
+    finally
+    {
+        Hooks.Netplay.ServerTcpListenerFactory = null;
+        Hooks.Netplay.CreateTcpListener -= CreateLegacyListener;
+        Hooks.Netplay.ServerPacketPass = null;
+    }
+    Console.WriteLine("Server network hooks successful");
+}
+
+static void ValidateServerFrameBudget()
+{
+    const int slot = 0;
+    var oldClient = Terraria.Netplay.Clients[slot];
+    var oldNetMode = Terraria.Main.netMode;
+    var client = new Terraria.RemoteClient { Id = slot };
+    var frames = new List<byte>();
+    void RecordFrame(object? sender, Hooks.MessageBuffer.GetDataEventArgs args)
+    {
+        frames.Add(args.PacketId);
+        args.Result = HookResult.Cancel;
+    }
+
+    try
+    {
+        Terraria.Main.netMode = 2;
+        Terraria.Netplay.Clients[slot] = client;
+        client.Reset();
+        client.Activate(new Terraria.Net.Sockets.TcpSocket());
+        Hooks.MessageBuffer.GetData += RecordFrame;
+        Hooks.NetMessage.ServerFrameBudget = _ => 1;
+        Terraria.NetMessage.ReceiveBytes(new byte[] { 3, 0, 1, 3, 0, 2, 3, 0 }, 8, slot);
+        Terraria.NetMessage.CheckBytes(slot);
+        if (!frames.SequenceEqual(new byte[] { 1 }) || !Terraria.NetMessage.buffer[slot].checkBytes)
+            throw new InvalidOperationException("The first pass must defer the second complete frame.");
+        Terraria.NetMessage.CheckBytes(slot);
+        if (!frames.SequenceEqual(new byte[] { 1, 2 }) || Terraria.NetMessage.buffer[slot].checkBytes)
+            throw new InvalidOperationException("A partial frame must wait for more data.");
+        Terraria.NetMessage.ReceiveBytes(new byte[] { 3 }, 1, slot);
+        Terraria.NetMessage.CheckBytes(slot);
+        if (!frames.SequenceEqual(new byte[] { 1, 2, 3 }))
+            throw new InvalidOperationException("Deferred frames must keep their wire order.");
+    }
+    finally
+    {
+        Hooks.NetMessage.ServerFrameBudget = null;
+        Hooks.MessageBuffer.GetData -= RecordFrame;
+        client.Reset();
+        Terraria.Netplay.Clients[slot] = oldClient;
+        Terraria.Main.netMode = oldNetMode;
+    }
 }
 
 HookEvents.Terraria.Main.DedServ += Main_DedServ;

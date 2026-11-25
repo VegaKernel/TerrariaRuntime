@@ -2,14 +2,13 @@
   <PropertyGroup>
     <LangVersion>preview</LangVersion>
     <TerrariaRuntimeTargetFramework>net11.0</TerrariaRuntimeTargetFramework>
-    <DotNetPreviewPackageVersion>11.0.0-preview.7.26381.103</DotNetPreviewPackageVersion>
+    <DotNetPackageVersion>11.0.0</DotNetPackageVersion>
     <MonoModPatcherVersion>25.0.1</MonoModPatcherVersion>
-    <MonoModRuntimeDetourVersion>25.3.6</MonoModRuntimeDetourVersion>
+    <MonoModCoreVersion>1.4.0-prerelease.3</MonoModCoreVersion>
+    <MonoModRuntimeDetourVersion>25.4.0-prerelease.3</MonoModRuntimeDetourVersion>
     <Features>$(Features);runtime-async=on</Features>
 
-    <!-- MonoMod's published 25.x buildTransitive guard still rejects TFMs above net10.
-         The .NET 11 support work is tracked upstream in MonoMod PR #307 and is not
-         released yet. Keep this explicit until a released MonoMod build supports net11. -->
+    <!-- The older build-time MonoMod.Patcher package still targets up to net10. -->
     <MonoMod_ReallySkipCheckTargetRuntime>true</MonoMod_ReallySkipCheckTargetRuntime>
   </PropertyGroup>
 </Project>

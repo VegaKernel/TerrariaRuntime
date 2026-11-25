@@ -1,6 +1,6 @@
 # TerrariaRuntime
 
-A server-only TerrariaRuntime distribution for Terraria 1.4.5.8 and .NET 11.
+A server-only TerrariaRuntime distribution for Terraria 1.4.6.1 and .NET 11.
 
 This repository patches the official PC dedicated-server assembly into
 `TerrariaRuntime.dll`, generates `TerrariaRuntime.Hooks.dll`, and creates one validation package
@@ -12,11 +12,11 @@ named `TerrariaRuntime.nupkg`. Runtime assembly names are `TerrariaRuntime` and
 The fork intentionally supports one target: the PC dedicated server.
 
 - Target framework: `net11.0`
-- SDK: `11.0.100-preview.7.26381.103`, pinned by `global.json`
-- Terraria server: `1.4.5.8`
+- SDK: `11.0.100`, pinned by `global.json`
+- Terraria server: `1.4.6.1`
 - Package ID: `TerrariaRuntime`
-- Package version: `1.0.1`
-- Runtime hooks: `MonoMod.RuntimeDetour 25.3.6`
+- Package version: `1.1.0`
+- Runtime hooks: `MonoMod.RuntimeDetour 25.4.0-prerelease.3`
 
 Client patching, graphics runtimes, mobile and tModLoader targets, and dynamic
 patch plugins were removed. The remaining XNA-shaped shims are small managed
@@ -43,10 +43,11 @@ Successful patching produces:
 - `src/TerrariaRuntime.Patcher/bin/Debug/net11.0/TerrariaRuntime.nupkg`
 - `src/TerrariaRuntime.Patcher/bin/Debug/net11.0/artifact-pc/`
 
-NuGet publication uses GitHub Actions Trusted Publishing when a matching
-`v1.0.1` tag publishes the current package. No long-lived NuGet API key is stored in the repository.
+NuGet publication uses GitHub Actions Trusted Publishing when a version tag matches
+the built package. No long-lived NuGet API key is stored in the repository.
 
 See [the .NET 11 baseline](docs/NET11.md) for dependency and validation rules.
+See [the server integration boundaries](docs/SERVER-BOUNDARIES.md) for network overrides, world ownership and damage validation.
 
 ## Future hook work
 

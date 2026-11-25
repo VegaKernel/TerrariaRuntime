@@ -22,7 +22,7 @@ using Mono.Cecil;
 using Mono.Cecil.Cil;
 using MonoMod;
 using System.Linq;
-using System.Runtime.ConstrainedExecution;
+using System.Threading;
 
 /// <summary>
 /// @doc Fix Terraria.Netplay.BroadcastThread infinite loop.
@@ -31,20 +31,21 @@ using System.Runtime.ConstrainedExecution;
 [MonoMod.MonoModIgnore]
 void PatchNetplayBroadcast(MonoModder modder)
 {
-    const string Name_BroadcastThreadActive = nameof(Terraria.patch_Netplay.BroadcastThreadActive);
     var BroadcastThread = modder.GetILCursor(() => Terraria.Netplay.BroadcastThread());
-    var BroadcastThreadActive = BroadcastThread.Method.DeclaringType.Fields.Single(m => m.Name == Name_BroadcastThreadActive);
+    var isCurrentThread = BroadcastThread.Method.DeclaringType.Methods.Single(
+        method => method.Name == nameof(Terraria.patch_Netplay.IsCurrentBroadcastThread));
 
     BroadcastThread.GotoNext(
         i => i.OpCode == OpCodes.Call
             && i.Operand is MethodReference methodReference
+            && methodReference.DeclaringType.FullName == "System.Threading.Thread"
             && methodReference.Name == "Sleep"
-            && i.Next.OpCode == OpCodes.Br_S
+            && (i.Next?.OpCode == OpCodes.Br_S || i.Next?.OpCode == OpCodes.Br)
     );
 
     BroadcastThread.Index++;
 
-    BroadcastThread.Emit(OpCodes.Ldsfld, BroadcastThreadActive);
+    BroadcastThread.Emit(OpCodes.Call, isCurrentThread);
     BroadcastThread.Next.OpCode = OpCodes.Brtrue;
     BroadcastThread.Index++;
     BroadcastThread.Emit(OpCodes.Ret);
@@ -54,24 +55,14 @@ namespace Terraria
 {
     partial class patch_Netplay : Terraria.Netplay
     {
-        /** Begin Fix - Thread abort */
-        public static bool BroadcastThreadActive = false;
-        public extern static void orig_BroadcastThread();
-        public static void BroadcastThread()
-        {
-            BroadcastThreadActive = true;
-            orig_BroadcastThread();
-        }
+        public static bool IsCurrentBroadcastThread() =>
+            ReferenceEquals(Thread.CurrentThread, Volatile.Read(ref Terraria.Netplay.broadcastThread));
 
         public extern static void orig_StopBroadCasting();
         public static void StopBroadCasting()
         {
-            BroadcastThreadActive = false;
-            Terraria.Netplay.broadcastThread.Join();
-            Terraria.Netplay.broadcastThread = null;
-
+            Interlocked.Exchange(ref Terraria.Netplay.broadcastThread, null)?.Join();
             orig_StopBroadCasting();
         }
-        /** End Fix - Thread abort */
     }
 }
