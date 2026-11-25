@@ -65,3 +65,7 @@ needs explicit testing if packet 28 is intercepted. Start with one supported
 damage path and test invalid ownership, stale target, duplicate hits and client
 prediction reconciliation before enabling strict authority. No damage rule is
 enabled by the transport hooks.
+
+### Local world serialization buffer (1.1.5)
+
+The server patch matches the native `WorldFile.InternalSaveWorld` serialization/write/re-read IL shape before replacing `MemoryStream.ToArray()`. The local path may reuse the backing array only at offset zero and passes its exact written byte count to native `FileUtilities.Write`. Cloud and non-exposable/nonzero-offset buffers retain their original exact copy. The existing readback, validation, rollback and rolling backups are not changed. `tests/WorldSaveBufferSmoke` exercises the generated helper after stream disposal, the native exact-count file writer and all fallback cases. Real medium/small world save/reload checks complement this smoke.
