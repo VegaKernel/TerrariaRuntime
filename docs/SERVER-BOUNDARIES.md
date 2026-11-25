@@ -15,6 +15,27 @@ setting `Netplay.UseGNS` before startup. The default TCP path does not need them
 | Outbound transport | Start with the socket adapter, existing `Hooks.NetMessage.SendBytes`, and queue instrumentation. Bound bytes per connection and isolate slow peers. | A skipped vanilla send must still satisfy buffer ownership and completion rules. Measure queue age, allocation rate and p99 tick latency before switching defaults. |
 | World isolation | Run one vanilla world per Vega worker process. Give each worker separate save paths and ports; reuse Vega's sandbox supervisor and route transfers explicitly. | Vanilla's `Main`, `Netplay`, `WorldGen` and RNG contain shared mutable state. A thread or load context is not the supported world-isolation boundary here. |
 
+### Connection and player lifecycle
+
+`Hooks.Netplay` exposes four connection notifications (all `Action<int, ISocket>`):
+
+* `ServerConnectionActivated`: the socket has been installed in the native slot.
+* `ServerPlayerEnteringWorld`: the game's initial connection state reaches 10,
+  on the world thread and before vanilla's initial player sync and greeting.
+  This is not an authentication decision; registration, SSC policy and account
+  authority remain host responsibilities.
+* `ServerConnectionClosing`: the native reset is about to begin, while the old
+  socket, character and `RemoteClient.Data`/`ClientUUID` remain available. Copy
+  any final immutable character data synchronously if in the world thread;
+  never capture the character from a worker after reset.
+* `ServerConnectionClosed`: the original socket is passed after vanilla reset.
+
+The socket identity must accompany the slot in lifecycle consumers so a delayed
+close cannot discard newer connection state. Closing and entering-world events
+are notifications, not veto callbacks: observer exceptions are logged and
+vanilla continues. Reset can occur outside the running world loop, so hosts
+should still check world-thread ownership before reading mutable player data.
+
 ## Damage authority
 
 `Hooks.MessageBuffer.GetData` can reject an inbound claim before gameplay side effects.

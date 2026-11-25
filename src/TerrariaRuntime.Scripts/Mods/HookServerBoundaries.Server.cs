@@ -59,6 +59,20 @@ void HookServerBoundaries(AssemblyPatcher modder)
     reset.Body.OptimizeMacros();
 
     var packet = GetMethod("Terraria.MessageBuffer", "GetData");
+    // The dedicated player's first world entry is the vanilla transition to
+    // State 10. Notify after the state store but before the initial sync/greeting.
+    // Branches which bypass this store must also bypass the notification.
+    var enteringWorld = packet.Body.Instructions.Single(instruction =>
+        Field(instruction, OpCodes.Stfld, "Terraria.RemoteClient", "State")
+        && instruction.Previous.OpCode == OpCodes.Ldc_I4 && (int)instruction.Previous.Operand == 10);
+    var packetIl = packet.Body.GetILProcessor();
+    var enteringWorldBuffer = Instruction.Create(OpCodes.Ldarg_0);
+    var enteringWorldSlot = Instruction.Create(OpCodes.Ldfld, packet.DeclaringType.Fields.Single(field => field.Name == "whoAmI"));
+    packetIl.InsertAfter(enteringWorld, enteringWorldBuffer);
+    packetIl.InsertAfter(enteringWorldBuffer, enteringWorldSlot);
+    packetIl.InsertAfter(enteringWorldSlot, Instruction.Create(OpCodes.Call,
+        modder.GetMethodDefinition(() => TerrariaRuntime.Hooks.Netplay.NotifyServerPlayerEnteringWorld(default))));
+
     var strike = packet.Body.Instructions.Single(instruction => Calls(instruction, "Terraria.NPC", "StrikeNPC"));
     var interaction = packet.Body.Instructions.Last(instruction => instruction.Offset < strike.Offset
         && Calls(instruction, "Terraria.NPC", "PlayerInteraction"));
@@ -94,7 +108,6 @@ void HookServerBoundaries(AssemblyPatcher modder)
     var notifyRemoval = modder.GetMethodDefinition(() => TerrariaRuntime.Hooks.MessageBuffer.NotifyServerProjectileRemoval(default, default));
     Before(packet, projectileKill.Next, Instruction.Create(OpCodes.Ldarg_0), Instruction.Create(OpCodes.Ldloc, removedProjectile), Instruction.Create(OpCodes.Call, notifyRemoval));
     var deactivate = removalJoin.Previous;
-    var packetIl = packet.Body.GetILProcessor();
     var loadOwner = Instruction.Create(OpCodes.Ldarg_0);
     var loadProjectile = Instruction.Create(OpCodes.Ldloc, removedProjectile);
     packetIl.InsertAfter(deactivate, loadOwner);
@@ -197,6 +210,8 @@ namespace TerrariaRuntime
             public static Func<ISocket, bool> ServerConnectionAdmission { get; set; }
             public static event Action<int, ISocket> ServerConnectionActivated;
             public static event Action<int, ISocket> ServerConnectionClosed;
+            /// <summary>Notifies after the server's initial connected-state transition, before initial player sync.</summary>
+            public static event Action<int, ISocket> ServerPlayerEnteringWorld;
 
             public static void EnqueueServerConnection(ConcurrentQueue<ISocket> queue, ISocket socket)
             {
@@ -228,6 +243,27 @@ namespace TerrariaRuntime
             }
 
             public static ISocket GetServerConnectionSocket(global::Terraria.RemoteClient client) => client.Socket;
+
+            public static void NotifyServerPlayerEnteringWorld(int slot)
+            {
+                if (global::Terraria.Main.dedServ && global::Terraria.Main.netMode == 2
+                    && (uint)slot < (uint)global::Terraria.Netplay.Clients.Length
+                    && global::Terraria.Netplay.Clients[slot] is { State: 10, Socket: { } socket })
+                    NotifyLifecycle(ServerPlayerEnteringWorld, slot, socket);
+            }
+
+            // Observers cannot interrupt vanilla's transition/cleanup. These
+            // notifications are not vetoes; failures belong to the host policy.
+            static void NotifyLifecycle(Action<int, ISocket> subscribers, int slot, ISocket socket)
+            {
+                if (subscribers is null)
+                    return;
+                foreach (Action<int, ISocket> subscriber in subscribers.GetInvocationList())
+                {
+                    try { subscriber(slot, socket); }
+                    catch (Exception ex) { Console.Error.WriteLine($"TerrariaRuntime lifecycle observer failed: {ex}"); }
+                }
+            }
 
             public static void NotifyServerConnectionClosed(global::Terraria.RemoteClient client, ISocket socket)
             {

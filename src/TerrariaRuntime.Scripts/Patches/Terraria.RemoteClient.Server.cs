@@ -97,6 +97,7 @@ namespace Terraria
         public extern void orig_Reset();
         public void Reset()
         {
+            TerrariaRuntime.Hooks.Netplay.NotifyServerConnectionClosing(this);
             // clear before possible socket exceptions
             Data.Clear();
             ClientUUID = null;
@@ -109,6 +110,25 @@ namespace TerrariaRuntime
 {
     public static partial class Hooks
     {
+        public static partial class Netplay
+        {
+            /// <summary>Notifies before Reset clears the old socket, character and connection metadata.</summary>
+            public static event Action<int, Terraria.Net.Sockets.ISocket> ServerConnectionClosing;
+
+            public static void NotifyServerConnectionClosing(global::Terraria.RemoteClient client)
+            {
+                var subscribers = ServerConnectionClosing;
+                if (!global::Terraria.Main.dedServ || subscribers is null || client.Socket is not { } socket)
+                    return;
+                // Disconnect cleanup must continue if an observer fails.
+                foreach (Action<int, Terraria.Net.Sockets.ISocket> subscriber in subscribers.GetInvocationList())
+                {
+                    try { subscriber(client.Id, socket); }
+                    catch (Exception ex) { Console.Error.WriteLine($"TerrariaRuntime connection-closing observer failed: {ex}"); }
+                }
+            }
+        }
+
         public static partial class MessageBuffer
         {
             public class ClientUUIDReceivedEventArgs : EventArgs

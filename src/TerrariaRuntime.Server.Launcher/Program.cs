@@ -228,14 +228,30 @@ static void ValidateServerFrameBudget()
     var client = new Terraria.RemoteClient { Id = slot };
     var frames = new List<byte>();
     var socket = new Terraria.Net.Sockets.TcpSocket();
-    int activated = 0, closed = 0;
+    int activated = 0, closing = 0, closed = 0, entering = 0;
+    bool preservedConnection = false;
+    var order = new List<string>();
     void OnActivated(int id, Terraria.Net.Sockets.ISocket connection)
     {
-        if (id == slot && ReferenceEquals(connection, socket)) activated++;
+        if (id == slot && ReferenceEquals(connection, socket)) { activated++; order.Add("activated"); }
+    }
+    void OnEnteringWorld(int id, Terraria.Net.Sockets.ISocket connection)
+    {
+        if (id == slot && ReferenceEquals(connection, socket) && client.State == 10)
+        { entering++; order.Add("entering"); }
+    }
+    void OnClosing(int id, Terraria.Net.Sockets.ISocket connection)
+    {
+        if (id == slot && ReferenceEquals(connection, socket))
+        {
+            closing++;
+            preservedConnection = ReferenceEquals(client.Socket, socket) && client.State == 10 && client.Data.ContainsKey("lifecycle-smoke");
+            order.Add("closing");
+        }
     }
     void OnClosed(int id, Terraria.Net.Sockets.ISocket connection)
     {
-        if (id == slot && ReferenceEquals(connection, socket)) closed++;
+        if (id == slot && ReferenceEquals(connection, socket)) { closed++; order.Add("closed"); }
     }
     void RecordFrame(object? sender, Hooks.MessageBuffer.GetDataEventArgs args)
     {
@@ -250,6 +266,8 @@ static void ValidateServerFrameBudget()
         Terraria.NetMessage.buffer[slot] = new Terraria.MessageBuffer { whoAmI = slot };
         client.Reset();
         Hooks.Netplay.ServerConnectionActivated += OnActivated;
+        Hooks.Netplay.ServerPlayerEnteringWorld += OnEnteringWorld;
+        Hooks.Netplay.ServerConnectionClosing += OnClosing;
         Hooks.Netplay.ServerConnectionClosed += OnClosed;
         client.Activate(socket);
         Hooks.MessageBuffer.GetData += RecordFrame;
@@ -265,15 +283,24 @@ static void ValidateServerFrameBudget()
         Terraria.NetMessage.CheckBytes(slot);
         if (!frames.SequenceEqual(new byte[] { 1, 2, 3 }))
             throw new InvalidOperationException("Deferred frames must keep their wire order.");
+        Hooks.Netplay.NotifyServerPlayerEnteringWorld(slot);
+        if (entering != 0)
+            throw new InvalidOperationException("An unconnected slot must not emit a world entry notification.");
+        client.State = 10;
+        Hooks.Netplay.NotifyServerPlayerEnteringWorld(slot);
+        client.Data["lifecycle-smoke"] = true;
         client.Reset();
-        if (activated != 1 || closed != 1)
-            throw new InvalidOperationException("Connection activation and close hooks must fire exactly once.");
+        if (activated != 1 || entering != 1 || closing != 1 || closed != 1 || !preservedConnection || client.Data.ContainsKey("lifecycle-smoke") ||
+            !order.SequenceEqual(new[] { "activated", "entering", "closing", "closed" }))
+            throw new InvalidOperationException("Connection lifecycle must expose the original connection before reset, then close in order.");
     }
     finally
     {
         Hooks.NetMessage.ServerFrameBudget = null;
         Hooks.MessageBuffer.GetData -= RecordFrame;
         Hooks.Netplay.ServerConnectionActivated -= OnActivated;
+        Hooks.Netplay.ServerPlayerEnteringWorld -= OnEnteringWorld;
+        Hooks.Netplay.ServerConnectionClosing -= OnClosing;
         Hooks.Netplay.ServerConnectionClosed -= OnClosed;
         if (client.Socket is not null) client.Reset();
         Terraria.NetMessage.buffer[slot] = oldBuffer;
