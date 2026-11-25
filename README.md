@@ -15,7 +15,7 @@ The fork intentionally supports one target: the PC dedicated server.
 - SDK: `11.0.100`, pinned by `global.json`
 - Terraria server: `1.4.6.1`
 - Package ID: `TerrariaRuntime`
-- Package version: `1.1.0`
+- Package version: `1.1.1`
 - Runtime hooks: `MonoMod.RuntimeDetour 25.4.0-prerelease.3`
 
 Client patching, graphics runtimes, mobile and tModLoader targets, and dynamic

@@ -27,6 +27,12 @@ namespace Terraria
 {
     class patch_WindowsLaunch
     {
+        // The dedicated server does not need the desktop graphics/audio libraries.
+        // The official Windows entry point still attempts to preload them on every OS.
+        public static void Preload(string nativeLibName)
+        {
+        }
+
         public static extern bool orig_SetConsoleCtrlHandler(WindowsLaunch.HandlerRoutine handler, bool add);
         public static bool SetConsoleCtrlHandler(WindowsLaunch.HandlerRoutine handler, bool add)
         {

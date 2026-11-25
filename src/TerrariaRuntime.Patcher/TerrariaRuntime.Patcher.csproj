@@ -3,7 +3,7 @@
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
 		<TargetFramework>$(TerrariaRuntimeTargetFramework)</TargetFramework>
-		<Version>1.1.0</Version>
+		<Version>1.1.1</Version>
 		<PreserveCompilationContext>true</PreserveCompilationContext>
 		<Nullable>enable</Nullable>
 		<PackageReleaseNotes>Terraria 1.4.6.1 on .NET 11</PackageReleaseNotes>

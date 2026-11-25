@@ -17,7 +17,7 @@
     </description>
     <summary>TerrariaRuntime [INJECT_VERSION] for Terraria 1.4.6.1[INJECT_GIT_HASH]</summary>
     <releaseNotes>
-      TerrariaRuntime 1.1.0 - Terraria 1.4.6.1, .NET 11, dedicated TCP listener and packet-pass overrides.
+      TerrariaRuntime 1.1.1 - Terraria 1.4.6.1, .NET 11, dedicated TCP listener and packet-pass overrides; remove desktop native preloads from the headless entry point.
     </releaseNotes>
     <tags>Terraria,TerrariaRuntime</tags>
     [INJECT_DEPENDENCIES]
