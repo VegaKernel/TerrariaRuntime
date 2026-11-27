@@ -28,7 +28,7 @@ using System.Linq;
 /// <summary>
 /// @doc Creates Hooks.NetMessage.SendBytes. Allows plugins to intercept the sending of data.
 /// </summary>
-[Patch(PatchStage.PreMerge, "Hooking Terraria.NetMessage.SendData")]
+[Patch(PatchStage.PreMerge, "Hooking Terraria.NetMessage.SendData", Dependencies = new[] { "PatchSendDataWriter", "PatchSendDataLocks" })]
 [MonoMod.MonoModIgnore]
 void HookClientSendBytes(MonoModder modder)
 {
@@ -53,6 +53,22 @@ void HookClientSendBytes(MonoModder modder)
             SendData.Remove();
         }
     }
+
+        // The writer patch generated the ToArray calls. Replace only the eight
+        // exact SendPacket sites, not other stream consumers or client sends.
+        var serializedSends = SendData.Body.Instructions.Where(i =>
+            i.Operand is MethodReference toArray && toArray.DeclaringType.FullName == "System.IO.MemoryStream" && toArray.Name == "ToArray" &&
+            i.Next?.Next?.Operand is MethodReference send && send.DeclaringType.FullName == "Terraria.NetMessage" && send.Name == "SendPacket").ToArray();
+        if (serializedSends.Length != 8)
+            throw new Exception($"Expected eight native SendPacket stream materializations, found {serializedSends.Length}.");
+        var sendSerialized = (MethodReference)modder.GetReference(() => TerrariaRuntime.Hooks.NetMessage.SendSerializedPacket(default, default));
+        foreach (var conversion in serializedSends)
+        {
+            conversion.OpCode = OpCodes.Nop;
+            conversion.Operand = null;
+            conversion.Next.Next.OpCode = OpCodes.Call;
+            conversion.Next.Next.Operand = SendData.Module.ImportReference(sendSerialized);
+        }
 
         var SendPacket = modder.GetILCursor(() => Terraria.NetMessage.SendPacket(default, default));
         // find each AsyncSend, replace with TerrariaRuntime.Hooks.NetMessage.InvokeSendBytes, and inject arg2 (remoteClient) as well.
@@ -106,6 +122,12 @@ void HookClientSendBytes(MonoModder modder)
 
 namespace TerrariaRuntime
 {
+    /// <summary>A socket may synchronously copy a borrowed serialized packet; it must not retain the span.</summary>
+    public interface IBorrowedPacketSocket
+    {
+        void SendBorrowed(ReadOnlySpan<byte> packet, global::Terraria.Net.Sockets.SocketSendCallback callback, object state);
+    }
+
     public static partial class Hooks
     {
         public static partial class NetMessage
@@ -155,12 +177,71 @@ namespace TerrariaRuntime
             public delegate void SendBytesFastHandler(ref SendBytesContext context);
             public static event SendBytesFastHandler SendBytesFast;
 
+            public struct ReadOnlySendBytesContext
+            {
+                private readonly byte[] data;
+                private readonly int offset;
+                public ReadOnlySendBytesContext(Terraria.Net.Sockets.ISocket socket, byte[] data, int offset, int size,
+                    global::Terraria.Net.Sockets.SocketSendCallback callback, object state, int remoteClient)
+                {
+                    Socket = socket; this.data = data; this.offset = offset; Size = size;
+                    Callback = callback; State = state; RemoteClient = remoteClient; Cancelled = false;
+                }
+                public Terraria.Net.Sockets.ISocket Socket { get; }
+                public int RemoteClient { get; }
+                public int Size { get; }
+                public ReadOnlySpan<byte> Data => new ReadOnlySpan<byte>(data, offset, Size);
+                public global::Terraria.Net.Sockets.SocketSendCallback Callback { get; }
+                public object State { get; }
+                public bool Cancelled { get; private set; }
+                public void Cancel() => Cancelled = true;
+            }
+
+            public delegate void ReadOnlySendBytesHandler(ref ReadOnlySendBytesContext context);
+            public static event ReadOnlySendBytesHandler SendBytesReadOnly;
+
+            [ThreadStatic] private static byte[] borrowedPacket;
+            [ThreadStatic] private static int borrowedLength;
+
+            // The native stream is local to one SendData invocation. Borrow only until
+            // SendPacket returns; nested sends restore the previous scope. Custom writers
+            // with an inconsistent length or nonzero offset keep the original array path.
+            public static void SendSerializedPacket(System.IO.MemoryStream stream, int remoteClient)
+            {
+                if (!stream.TryGetBuffer(out var segment) || segment.Offset != 0 || segment.Count < 3 ||
+                    BitConverter.ToUInt16(segment.Array, 0) != segment.Count)
+                {
+                    Terraria.NetMessage.SendPacket(stream.ToArray(), remoteClient);
+                    return;
+                }
+                byte[] previous = borrowedPacket;
+                int previousLength = borrowedLength;
+                borrowedPacket = segment.Array;
+                borrowedLength = segment.Count;
+                try { Terraria.NetMessage.SendPacket(segment.Array, remoteClient); }
+                finally { borrowedPacket = previous; borrowedLength = previousLength; }
+            }
+
+            // The generated mutable SendPacket hook calls this only on its observed
+            // branch, before exposing data or the original-method delegate to handlers.
+            internal static byte[] EnsureOwnedPacketBeforeHook(byte[] data) =>
+                ReferenceEquals(data, borrowedPacket) && data != null ? new ReadOnlySpan<byte>(data, 0, borrowedLength).ToArray() : data;
+
             public static void InvokeSendBytes(Terraria.Net.Sockets.ISocket socket, byte[] data, int offset, int size, global::Terraria.Net.Sockets.SocketSendCallback callback, object state, int remoteClient)
             {
                 // Legacy hooks retain their original multicast and cancellation semantics.
                 // Do not allocate an EventArgs for every recipient when no legacy hook exists.
                 var legacy = SendBytes;
                 var fast = SendBytesFast;
+                var readOnly = SendBytesReadOnly;
+                bool borrowed = ReferenceEquals(data, borrowedPacket) && data != null;
+                var borrowedSocket = socket as IBorrowedPacketSocket;
+                if (borrowed && (legacy != null || fast != null || borrowedSocket == null))
+                {
+                    data = new ReadOnlySpan<byte>(data, offset, size).ToArray();
+                    offset = 0;
+                    borrowed = false;
+                }
                 if (legacy != null)
                 {
                     var args = new SendBytesEventArgs()
@@ -181,6 +262,17 @@ namespace TerrariaRuntime
                     var context = new SendBytesContext(socket, data, offset, size, callback, state, remoteClient);
                     fast(ref context);
                     if (context.Cancelled) return;
+                }
+                if (readOnly != null)
+                {
+                    var context = new ReadOnlySendBytesContext(socket, data, offset, size, callback, state, remoteClient);
+                    readOnly(ref context);
+                    if (context.Cancelled) return;
+                }
+                if (borrowed)
+                {
+                    borrowedSocket.SendBorrowed(new ReadOnlySpan<byte>(data, offset, size), callback, state);
+                    return;
                 }
                 socket.AsyncSend(data, offset, size, callback, state);
             }

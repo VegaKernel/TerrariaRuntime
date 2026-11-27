@@ -160,6 +160,65 @@ var firstCallback = (SocketSendCallback)getter.Invoke(firstClient, null)!;
 Require(ReferenceEquals(firstCallback, getter.Invoke(firstClient, null)) && ReferenceEquals(firstCallback.Target, firstClient), "Repeated callback uses same native client target/delegate");
 var secondCallback = (SocketSendCallback)getter.Invoke(secondClient, null)!;
 Require(!ReferenceEquals(firstCallback, secondCallback) && ReferenceEquals(secondCallback.Target, secondClient), "Different client objects never share callbacks");
+
+// Exercise native SendPacket (including its generated subscriber snapshot), not
+// merely the byte-hook helper. A borrowed stream is larger than its packet, and
+// neither a mutable hook nor an unknown socket may see the backing capacity.
+const int fixtureSlot = 7;
+global::Terraria.Main.dedServ = true;
+global::Terraria.Main.netMode = 2;
+NetMessage.buffer[fixtureSlot] = new MessageBuffer { whoAmI = fixtureSlot };
+var borrowingSocket = new BorrowedRecordingSocket();
+var nativeClient = new RemoteClient { Id = fixtureSlot, State = 10 };
+nativeClient.Activate(borrowingSocket);
+Netplay.Clients[fixtureSlot] = nativeClient;
+using var serialized = new MemoryStream(128);
+serialized.Write([5, 0, 13, 1, 2]);
+int observedReadOnly = 0;
+void ReadOnly(ref SendHooks.ReadOnlySendBytesContext context)
+{
+    Require(context.Data.Length == 5 && context.Data[0] == 5 && context.RemoteClient == fixtureSlot, "Read-only observer gets exact length");
+    observedReadOnly++;
+}
+SendHooks.SendBytesReadOnly += ReadOnly;
+try
+{
+    SendHooks.SendSerializedPacket(serialized, fixtureSlot);
+    Require(borrowingSocket.BorrowedSends == 1 && borrowingSocket.Sends == 0 && borrowingSocket.LastByte == 2, "Borrow-capable socket gets exact span");
+    void MutateGenerated(object? _, HookEvents.Terraria.NetMessage.SendPacketEventArgs arguments)
+    {
+        Require(arguments.data.Length == 5, "Generated subscriber sees the original owned array shape");
+        arguments.data[4] = 9;
+    }
+    HookEvents.Terraria.NetMessage.SendPacket += MutateGenerated;
+    try { SendHooks.SendSerializedPacket(serialized, fixtureSlot); }
+    finally { HookEvents.Terraria.NetMessage.SendPacket -= MutateGenerated; }
+    Require(borrowingSocket.Sends == 1 && borrowingSocket.LastByte == 9 && serialized.GetBuffer()[4] == 2, "Generated mutation isolated from serialization");
+    void MutateLegacy(object? _, SendHooks.SendBytesEventArgs arguments)
+    {
+        Require(arguments.Data.Length == 5, "Legacy subscriber sees exact-sized owned array");
+        arguments.Data[4] = 8;
+    }
+    SendHooks.SendBytes += MutateLegacy;
+    try { SendHooks.SendSerializedPacket(serialized, fixtureSlot); }
+    finally { SendHooks.SendBytes -= MutateLegacy; }
+    Require(borrowingSocket.Sends == 2 && borrowingSocket.LastByte == 8 && serialized.GetBuffer()[4] == 2, "Legacy mutation isolated from serialization");
+    SendHooks.SendSerializedPacket(serialized, fixtureSlot);
+    Require(borrowingSocket.BorrowedSends == 2 && borrowingSocket.LastByte == 2 && observedReadOnly == 4, "Borrow path resumes after mutable observers detach");
+    for (int i = 0; i < 50_000; i++) SendHooks.SendSerializedPacket(serialized, fixtureSlot);
+    long beforeBorrow = GC.GetAllocatedBytesForCurrentThread();
+    for (int i = 0; i < iterations; i++) SendHooks.SendSerializedPacket(serialized, fixtureSlot);
+    long borrowedBytes = GC.GetAllocatedBytesForCurrentThread() - beforeBorrow;
+    Console.WriteLine($"Borrowed native packet calls={iterations}; allocated={borrowedBytes}");
+    Require(borrowedBytes <= 1024, "Borrowed native packet path must not materialize per-recipient arrays");
+}
+finally { SendHooks.SendBytesReadOnly -= ReadOnly; }
+var ordinarySocket = new RecordingSocket();
+var ordinaryClient = new RemoteClient { Id = fixtureSlot, State = 10 };
+ordinaryClient.Activate(ordinarySocket);
+Netplay.Clients[fixtureSlot] = ordinaryClient;
+SendHooks.SendSerializedPacket(serialized, fixtureSlot);
+Require(ordinarySocket.Sends == 1 && ordinarySocket.LastArray!.Length == 5 && !ReferenceEquals(ordinarySocket.LastArray, serialized.GetBuffer()), "Unknown socket retains an independent exact-sized array");
 Console.WriteLine("HookEmitter smoke passed.");
 
 static void ReplaceWarningTimes(object? _, HookEvents.Terraria.Main.GetMoonlordSmolBulletWarningTimesEventArgs args)
@@ -186,12 +245,16 @@ static void Require(bool condition, string message)
     if (!condition) throw new InvalidOperationException(message);
 }
 
-sealed class RecordingSocket : ISocket
+class RecordingSocket : ISocket
 {
     public int Sends { get; private set; }
+    public byte[]? LastArray { get; private set; }
+    public byte LastByte { get; protected set; }
     public void AsyncSend(byte[] data, int offset, int size, SocketSendCallback callback, object? state = null)
     {
         Sends++;
+        LastArray = data;
+        LastByte = data[offset + size - 1];
         callback(state);
     }
     public void Close() { }
@@ -202,4 +265,15 @@ sealed class RecordingSocket : ISocket
     public bool StartListening(SocketConnectionAccepted callback) => throw new NotSupportedException();
     public void StopListening() => throw new NotSupportedException();
     public void AsyncReceive(byte[] data, int offset, int size, SocketReceiveCallback callback, object? state = null) => throw new NotSupportedException();
+}
+
+sealed class BorrowedRecordingSocket : RecordingSocket, IBorrowedPacketSocket
+{
+    public int BorrowedSends { get; private set; }
+    public void SendBorrowed(ReadOnlySpan<byte> packet, SocketSendCallback callback, object? state)
+    {
+        BorrowedSends++;
+        LastByte = packet[^1];
+        callback(state);
+    }
 }

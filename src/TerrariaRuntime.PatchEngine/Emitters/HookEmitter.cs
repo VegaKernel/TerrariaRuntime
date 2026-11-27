@@ -532,6 +532,21 @@ public static class HookEmitter
         il.Emit(OpCodes.Ret);
         il.Append(observed);
 
+        // A serialized native packet may be borrowed from a SendData-local stream.
+        // Generated SendPacket subscribers keep their exact, independently owned
+        // byte[] ABI, including mutations and OriginalMethod calls. Do this inside
+        // the captured-subscriber branch rather than racing a separate event probe.
+        if (original.DeclaringType.FullName == "Terraria.NetMessage" && original.Name == "SendPacket" &&
+            original.Parameters.Count == 2 && original.Parameters[0].ParameterType.FullName == "System.Byte[]")
+        {
+            var nativeHooks = original.Module.GetType("TerrariaRuntime.Hooks").NestedTypes.Single(x => x.Name == "NetMessage");
+            var ownPacket = nativeHooks.Methods.Single(x => x.Name == "EnsureOwnedPacketBeforeHook");
+            var dataParameter = methodDefinition.Parameters[0];
+            il.Emit(OpCodes.Ldarg, dataParameter);
+            il.Emit(OpCodes.Call, ownPacket);
+            il.Emit(OpCodes.Starg, dataParameter);
+        }
+
         // if any out parameters, initialise them with default values
         foreach (var param in methodDefinition.Parameters.Where(x => x.IsOut))
         {
