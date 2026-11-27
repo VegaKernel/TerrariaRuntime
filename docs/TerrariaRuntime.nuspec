@@ -17,7 +17,7 @@
     </description>
     <summary>TerrariaRuntime [INJECT_VERSION] for Terraria 1.4.6.1[INJECT_GIT_HASH]</summary>
     <releaseNotes>
-      TerrariaRuntime 1.1.8 - Terraria 1.4.6.1 on .NET 11; read-only completed native NPC strike observation, preserving the original damage result and control flow.
+      TerrariaRuntime 1.1.9 - Terraria 1.4.6.1 on .NET 11; source-aware completed native NPC strike observation retaining the existing source-less API.
     </releaseNotes>
     <tags>Terraria,TerrariaRuntime</tags>
     [INJECT_DEPENDENCIES]

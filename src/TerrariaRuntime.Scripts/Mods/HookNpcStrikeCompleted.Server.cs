@@ -6,7 +6,7 @@ using Mono.Cecil.Rocks;
 using TerrariaRuntime.PatchEngine;
 
 /// <summary>Observes a completed native NPC strike while preserving the original return value and finally block.</summary>
-[Patch(PatchStage.PreMerge, "Observing completed native NPC strikes")]
+[Patch(PatchStage.PreMerge, "Observing completed native NPC strikes", PatchPriority.Late, new[] { "NpcStrikeArgs" })]
 [MonoMod.MonoModIgnore]
 void HookNpcStrikeCompleted(AssemblyPatcher modder)
 {
@@ -26,7 +26,10 @@ void HookNpcStrikeCompleted(AssemblyPatcher modder)
 
     // The evaluation stack holds the returned native damage. The helper returns exactly
     // that integer. Early zero returns and exceptions never pass this post-finally boundary.
-    var callback = modder.GetMethodDefinition(() => TerrariaRuntime.Hooks.NPC.NotifyStrikeCompleted(default, default, default, default));
+    // PatchNpcStrikeArgs adds the optional native caller Entity before this patch.
+    // Keep that value as observational context, not proof of an authenticated attacker.
+    var source = strike.Parameters.Single(parameter => parameter.Name == "entity" && parameter.ParameterType.FullName == "Terraria.Entity");
+    var callback = modder.GetMethodDefinition(() => TerrariaRuntime.Hooks.NPC.NotifyStrikeCompletedWithSource(default, default, default, default, default));
     var il = strike.Body.GetILProcessor();
     completedReturn.OpCode = OpCodes.Nop;
     var anchor = completedReturn;
@@ -35,6 +38,7 @@ void HookNpcStrikeCompleted(AssemblyPatcher modder)
         Instruction.Create(OpCodes.Ldarg_0),
         Instruction.Create(OpCodes.Ldarg, strike.Parameters.Single(parameter => parameter.Name == "Damage")),
         Instruction.Create(OpCodes.Ldarg, strike.Parameters.Single(parameter => parameter.Name == "crit")),
+        Instruction.Create(OpCodes.Ldarg, source),
         Instruction.Create(OpCodes.Call, callback),
         Instruction.Create(OpCodes.Ret)
     })
@@ -53,6 +57,24 @@ namespace TerrariaRuntime
         {
             /// <summary>After native StrikeNPC's successful completion. Damage is the native return value, not a life-delta claim.</summary>
             public static event Action<Terraria.NPC, int, int, bool>? StrikeCompleted;
+
+            /// <summary>After native StrikeNPC completion, including the patched caller context. Null means no source was supplied; a source does not certify attacker identity.</summary>
+            public static event Action<Terraria.NPC, int, int, bool, Terraria.Entity?>? StrikeCompletedWithSource;
+
+            public static int NotifyStrikeCompletedWithSource(int damage, Terraria.NPC npc, int requestedDamage, bool critical, Terraria.Entity? source)
+            {
+                if (damage <= 0) return damage;
+                var observers = StrikeCompletedWithSource;
+                if (observers is not null)
+                {
+                    foreach (var observer in Delegate.EnumerateInvocationList(observers))
+                    {
+                        try { observer(npc, damage, requestedDamage, critical, source); }
+                        catch (Exception) { /* Keep notification faults isolated from native damage and other observers. */ }
+                    }
+                }
+                return NotifyStrikeCompleted(damage, npc, requestedDamage, critical);
+            }
 
             public static int NotifyStrikeCompleted(int damage, Terraria.NPC npc, int requestedDamage, bool critical)
             {

@@ -65,6 +65,8 @@ try
     var struck = new NPC { whoAmI = 7, generation = 4, active = true, type = 1, life = 100, lifeMax = 100,
         defense = 0, realLife = -1, takenDamageMultiplier = 1, knockBackResist = 0 };
     int observations = 0, observedDamage = 0, observedLife = 0;
+    int sourceObservations = 0;
+    Entity? observedSource = null;
     void ThrowingStrikeObserver(NPC target, int damage, int requested, bool critical) => throw new InvalidOperationException("fixture observer");
     void StrikeObserver(NPC target, int damage, int requested, bool critical)
     {
@@ -73,15 +75,33 @@ try
         observedDamage = damage;
         observedLife = target.life;
     }
+    void ThrowingSourceObserver(NPC target, int damage, int requested, bool critical, Entity? source) => throw new InvalidOperationException("fixture source observer");
+    void SourceObserver(NPC target, int damage, int requested, bool critical, Entity? source)
+    {
+        Require(ReferenceEquals(target, struck) && damage == 10 && requested == 10 && !critical, "Native source-aware strike arguments preserved");
+        sourceObservations++;
+        observedSource = source;
+    }
     Hooks.NPC.StrikeCompleted += ThrowingStrikeObserver;
     Hooks.NPC.StrikeCompleted += StrikeObserver;
+    Hooks.NPC.StrikeCompletedWithSource += ThrowingSourceObserver;
+    Hooks.NPC.StrikeCompletedWithSource += SourceObserver;
     try
     {
         int damage = struck.StrikeNPC(10, 0, 0, false, true, 1);
         Require(damage == 10 && struck.life == 90 && observedDamage == damage && observedLife == 90 && observations == 1,
             "Native strike completes exactly once with unchanged damage and post-strike life");
+        Require(sourceObservations == 1 && observedSource is null, "Source-aware strike reports an explicitly unknown caller");
+        var sourcePlayer = new Player { whoAmI = 9 };
+        var sourceProjectile = new Projectile { whoAmI = 3, owner = 9 };
+        Require(struck.StrikeNPC(10, 0, 0, false, true, 1, sourcePlayer) == 10 && struck.life == 80 &&
+            observations == 2 && sourceObservations == 2 && ReferenceEquals(observedSource, sourcePlayer),
+            "Player caller context survives native strike completion while legacy notification stays intact");
+        Require(struck.StrikeNPC(10, 0, 0, false, true, 1, sourceProjectile) == 10 && struck.life == 70 &&
+            observations == 3 && sourceObservations == 3 && ReferenceEquals(observedSource, sourceProjectile),
+            "Projectile caller context survives native strike completion unchanged");
         struck.active = false;
-        Require(struck.StrikeNPC(10, 0, 0, false, true, 1) == 0 && observations == 1,
+        Require(struck.StrikeNPC(10, 0, 0, false, true, 1, sourcePlayer) == 0 && observations == 3 && sourceObservations == 3,
             "Native early zero return emits no completion observation");
         struck.active = true;
         void SkipVanillaStrike(NPC target, HookEvents.Terraria.NPC.StrikeNPCEventArgs strikeArgs)
@@ -92,21 +112,27 @@ try
         HookEvents.Terraria.NPC.StrikeNPC += SkipVanillaStrike;
         try
         {
-            Require(struck.StrikeNPC(10, 0, 0, false, true, 1) == 17 && struck.life == 90 && observations == 1,
+            Require(struck.StrikeNPC(10, 0, 0, false, true, 1, sourcePlayer) == 17 && struck.life == 70 &&
+                observations == 3 && sourceObservations == 3,
                 "Legacy before-hook override does not become a false native completion");
         }
         finally { HookEvents.Terraria.NPC.StrikeNPC -= SkipVanillaStrike; }
+        Require(Hooks.NPC.NotifyStrikeCompleted(10, struck, 10, false) == 10 &&
+            observations == 4 && sourceObservations == 3,
+            "Existing explicit source-less helper retains legacy behavior only");
     }
     finally
     {
         Hooks.NPC.StrikeCompleted -= ThrowingStrikeObserver;
         Hooks.NPC.StrikeCompleted -= StrikeObserver;
+        Hooks.NPC.StrikeCompletedWithSource -= ThrowingSourceObserver;
+        Hooks.NPC.StrikeCompletedWithSource -= SourceObserver;
     }
     // Qualification of the new helper itself, separate from native strike work.
-    for (int i = 0; i < 10000; i++) Hooks.NPC.NotifyStrikeCompleted(10, struck, 10, false);
+    for (int i = 0; i < 10000; i++) Hooks.NPC.NotifyStrikeCompletedWithSource(10, struck, 10, false, null);
     long strikeAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
     int strikeChecksum = 0;
-    for (int i = 0; i < 100000; i++) strikeChecksum += Hooks.NPC.NotifyStrikeCompleted(10, struck, 10, false);
+    for (int i = 0; i < 100000; i++) strikeChecksum += Hooks.NPC.NotifyStrikeCompletedWithSource(10, struck, 10, false, null);
     long strikeAllocated = GC.GetAllocatedBytesForCurrentThread() - strikeAllocatedBefore;
     Require(strikeChecksum == 1000000 && strikeAllocated <= 1024, "Unobserved strike completion allocates no hook state");
     Console.WriteLine($"Unobserved NPC strike completions=100000; allocated={strikeAllocated}");

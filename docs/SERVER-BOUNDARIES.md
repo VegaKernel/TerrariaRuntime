@@ -84,6 +84,19 @@ must check world-thread ownership and immediately copy immutable NPC values, not
 retain the native reference. This is an outcome notification, not hit authority
 or attacker attribution. Unobserved calls allocate no hook state.
 
+Version 1.1.9 adds `Hooks.NPC.StrikeCompletedWithSource`, an observational
+`Action<NPC, int, int, bool, Entity?>` at the same native completion boundary.
+The additional `Entity?` is the existing patched `StrikeNPC` caller context:
+native player, projectile or absent source depending on the calling path. It
+must not be treated as proof of a valid attack, projectile ownership or an
+authenticated player session. Consumers copy the source metadata immediately
+under world-thread ownership and validate the exact active world/session
+independently. Both events are preserved; observer failure in either cannot
+skip the other or change the native damage result. Callers of the existing
+source-less public helper remain unchanged. The patch explicitly depends on
+`NpcStrikeArgs` and checks the pinned parameter/control-flow shape. Without
+subscribers the source-aware hook also allocates no event state.
+
 ### Local world serialization buffer (1.1.5)
 
 The server patch matches the native `WorldFile.InternalSaveWorld` serialization/write/re-read IL shape before replacing `MemoryStream.ToArray()`. The local path may reuse the backing array only at offset zero and passes its exact written byte count to native `FileUtilities.Write`. Cloud and non-exposable/nonzero-offset buffers retain their original exact copy. The existing readback, validation, rollback and rolling backups are not changed. `tests/WorldSaveBufferSmoke` exercises the generated helper after stream disposal, the native exact-count file writer and all fallback cases. Real medium/small world save/reload checks complement this smoke.
