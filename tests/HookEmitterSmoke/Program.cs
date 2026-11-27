@@ -52,6 +52,72 @@ try
 }
 finally { HookEvents.Terraria.Item.TryAddStack -= CallOriginal; }
 
+// Post-strike notification is attached to the actual native success return,
+// not the before hook or a synthetic packet. Verify native result and life.
+int originalMode = global::Terraria.Main.netMode;
+int originalPlayer = global::Terraria.Main.myPlayer;
+bool originalDedicated = global::Terraria.Main.dedServ;
+try
+{
+    global::Terraria.Main.netMode = 2;
+    global::Terraria.Main.myPlayer = 255;
+    global::Terraria.Main.dedServ = true;
+    var struck = new NPC { whoAmI = 7, generation = 4, active = true, type = 1, life = 100, lifeMax = 100,
+        defense = 0, realLife = -1, takenDamageMultiplier = 1, knockBackResist = 0 };
+    int observations = 0, observedDamage = 0, observedLife = 0;
+    void ThrowingStrikeObserver(NPC target, int damage, int requested, bool critical) => throw new InvalidOperationException("fixture observer");
+    void StrikeObserver(NPC target, int damage, int requested, bool critical)
+    {
+        Require(ReferenceEquals(target, struck) && requested == 10 && !critical, "Native strike arguments preserved");
+        observations++;
+        observedDamage = damage;
+        observedLife = target.life;
+    }
+    Hooks.NPC.StrikeCompleted += ThrowingStrikeObserver;
+    Hooks.NPC.StrikeCompleted += StrikeObserver;
+    try
+    {
+        int damage = struck.StrikeNPC(10, 0, 0, false, true, 1);
+        Require(damage == 10 && struck.life == 90 && observedDamage == damage && observedLife == 90 && observations == 1,
+            "Native strike completes exactly once with unchanged damage and post-strike life");
+        struck.active = false;
+        Require(struck.StrikeNPC(10, 0, 0, false, true, 1) == 0 && observations == 1,
+            "Native early zero return emits no completion observation");
+        struck.active = true;
+        void SkipVanillaStrike(NPC target, HookEvents.Terraria.NPC.StrikeNPCEventArgs strikeArgs)
+        {
+            strikeArgs.ContinueExecution = false;
+            strikeArgs.HookReturnValue = 17;
+        }
+        HookEvents.Terraria.NPC.StrikeNPC += SkipVanillaStrike;
+        try
+        {
+            Require(struck.StrikeNPC(10, 0, 0, false, true, 1) == 17 && struck.life == 90 && observations == 1,
+                "Legacy before-hook override does not become a false native completion");
+        }
+        finally { HookEvents.Terraria.NPC.StrikeNPC -= SkipVanillaStrike; }
+    }
+    finally
+    {
+        Hooks.NPC.StrikeCompleted -= ThrowingStrikeObserver;
+        Hooks.NPC.StrikeCompleted -= StrikeObserver;
+    }
+    // Qualification of the new helper itself, separate from native strike work.
+    for (int i = 0; i < 10000; i++) Hooks.NPC.NotifyStrikeCompleted(10, struck, 10, false);
+    long strikeAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+    int strikeChecksum = 0;
+    for (int i = 0; i < 100000; i++) strikeChecksum += Hooks.NPC.NotifyStrikeCompleted(10, struck, 10, false);
+    long strikeAllocated = GC.GetAllocatedBytesForCurrentThread() - strikeAllocatedBefore;
+    Require(strikeChecksum == 1000000 && strikeAllocated <= 1024, "Unobserved strike completion allocates no hook state");
+    Console.WriteLine($"Unobserved NPC strike completions=100000; allocated={strikeAllocated}");
+}
+finally
+{
+    global::Terraria.Main.netMode = originalMode;
+    global::Terraria.Main.myPlayer = originalPlayer;
+    global::Terraria.Main.dedServ = originalDedicated;
+}
+
 var overrideCalls = 0;
 HookEvents.HookDelegate<Projectile, HookEvents.Terraria.Projectile.UnpackTargetIndexEventArgs> secondHandler =
     (_, _) => overrideCalls++;

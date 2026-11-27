@@ -70,6 +70,20 @@ damage path and test invalid ownership, stale target, duplicate hits and client
 prediction reconciliation before enabling strict authority. No damage rule is
 enabled by the transport hooks.
 
+### NPC strike completion (1.1.8)
+
+`Hooks.NPC.StrikeCompleted` is an observational `Action<NPC, int, int, bool>`
+after the native `StrikeNPC` positive damage return and its `finally` block.
+The values are the native NPC reference at completion, returned damage,
+requested damage and critical-hit flag. The returned damage is not a guarantee
+of an equal life decrement (shared-life and special NPCs may differ). The patch
+keeps the original integer on the return path; zero returns, rejected early
+calls and exceptions emit no observation. Each observer is isolated from the
+completed native call; there are no mutable arguments or veto results. Consumers
+must check world-thread ownership and immediately copy immutable NPC values, not
+retain the native reference. This is an outcome notification, not hit authority
+or attacker attribution. Unobserved calls allocate no hook state.
+
 ### Local world serialization buffer (1.1.5)
 
 The server patch matches the native `WorldFile.InternalSaveWorld` serialization/write/re-read IL shape before replacing `MemoryStream.ToArray()`. The local path may reuse the backing array only at offset zero and passes its exact written byte count to native `FileUtilities.Write`. Cloud and non-exposable/nonzero-offset buffers retain their original exact copy. The existing readback, validation, rollback and rolling backups are not changed. `tests/WorldSaveBufferSmoke` exercises the generated helper after stream disposal, the native exact-count file writer and all fallback cases. Real medium/small world save/reload checks complement this smoke.
